@@ -1,19 +1,16 @@
-from src.preprocess import load_metadata
+from src.preprocess import load_metadata, MaestroPipeline
 from pathlib import Path
 import torch
 import torchaudio
 
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 maestro_path = r"D:/databases/maestro-v3.0.0"
 ds = load_metadata(maestro_path)
 
-# print(torchaudio.info(ds[0].audio_path).sample_rate)
+maestro = MaestroPipeline().to(device)
 
-for song in ds:
-    sr = torchaudio.info(song.audio_path).sample_rate
-    if sr not in [48000, 44100]:
-        print(sr)
+waveform, orig_sr = torchaudio.load(ds[0].audio_path)
+waveform = waveform.to(device)
 
-
-
-# print(a.device)
+cqt_image = maestro(waveform, orig_sr)

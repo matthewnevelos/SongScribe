@@ -73,6 +73,7 @@ class WaveformAugmenter(torch.nn.Module):
         # (You only want to augment the Training dataset, never the Test dataset)
         if torch.rand(1).item() > self.p:
             return waveform
+
             
         device = waveform.device
 
@@ -164,6 +165,21 @@ class SpectAugmenter(torch.nn.Module):
         
     def forward(self, spectrogram):
         # device = spectrogram.device #do I need to(device)? #TODO
-        masked = self.time_mask(spectrogram)
-        masked = self.freq_mask(masked)
+        masked = self.time_mask(spectrogram).to(spectrogram.device)
+        masked = self.freq_mask(masked).to(spectrogram.device)
         return masked
+    
+class MaestroPipeline(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        
+        self.augmenter = WaveformAugmenter()
+        self.cqt = CQTPreprocessor(n_bins=88)
+        self.spec_aug = SpectAugmenter()
+        
+    def forward(self, waveform, orig_sr):
+        x = self.augmenter(waveform)
+        x = self.cqt(x, orig_sr)
+        x = self.spec_aug(x)
+        
+        return x
