@@ -44,7 +44,7 @@ pip3 install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url=http
 Once PyTorch is installed, the other dependencies can be installed
 
 ```
-pip install nnAudio librosa music21 mido mir_eval soundfile
+pip install nnAudio librosa music21 mido mir_eval soundfile matplotlib
 ```
 
 A sheet music renderer is needed for music21. 
