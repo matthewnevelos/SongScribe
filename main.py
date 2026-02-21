@@ -1,4 +1,4 @@
-from src.preprocess import load_metadata, MaestroPipeline
+from src.preprocess import load_metadata, MaestroPreprocessor
 from pathlib import Path
 import torch
 import torchaudio
@@ -8,9 +8,15 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 maestro_path = r"D:/databases/maestro-v3.0.0"
 ds = load_metadata(maestro_path)
 
-maestro = MaestroPipeline().to(device)
+maestro = MaestroPreprocessor().to(device)
 
-waveform, orig_sr = torchaudio.load(ds[0].audio_path)
-waveform = waveform.to(device)
+# preprocess audio
+for i, song in enumerate(ds[:1]):
 
-cqt_image = maestro(waveform, orig_sr)
+    waveform, orig_sr = torchaudio.load(song.audio_path)
+    waveform = waveform.to(device)
+    
+    augmented_cqt, labels = maestro(waveform, orig_sr, midi_path=song.midi_path, augment=True)
+    labels  =labels.to(device)
+
+    print(f"done {i}")

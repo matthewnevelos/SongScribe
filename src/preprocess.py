@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import torch
 import torchaudio
 from nnAudio.features.cqt import CQT1992v2
+import pretty_midi
+import numpy as np
 
 
 @dataclass
@@ -52,30 +54,30 @@ def load_metadata(maestro_path: str) -> list[MaestroMetadata]:
 
 
 class WaveformAugmenter(torch.nn.Module):
-    def __init__(self, p=0.5, min_gain=0.5, max_gain=1.5, max_noise_factor=0.01):
+    def __init__(self, min_gain=0.5, max_gain=1.5, max_noise_factor=0.01):
         """
-        Applies random time-domain augmentations to raw audio tensors.
+        control input gain and background sound.
         
-        Args:
-            p: Probability that the augmentations will be applied (0.0 to 1.0).
-            min_gain: Minimum volume multiplier.
-            max_gain: Maximum volume multiplier.
-            max_noise_factor: Maximum amplitude of the injected white noise.
+        Parameters
+        ----------
+        min_gain : float, optional
+            min volume multiplier, by default 0.5
+        max_gain : float, optional
+            max volume multiplier, by default 1.5
+        max_noise_factor : float, optional
+            background noise amplitude, by default 0.01
         """
+
         super().__init__()
-        self.p = p
         self.min_gain = min_gain
         self.max_gain = max_gain
         self.max_noise_factor = max_noise_factor
 
-    def forward(self, waveform):
-        # Only apply augmentations randomly based on probability 'p'
-        # (You only want to augment the Training dataset, never the Test dataset)
-        if torch.rand(1).item() > self.p:
-            return waveform
-
-            
+    def forward(self, waveform, augment=True):   
         device = waveform.device
+        
+        if not augment:
+            return waveform
 
         # scale gain
         gain_multiplier = self.min_gain + torch.rand(1, device=device) * (self.max_gain - self.min_gain)
@@ -151,35 +153,162 @@ class SpectAugmenter(torch.nn.Module):
 
         Parameters
         ----------
-        freq_mask_param : int
-            max consectutive masked frequencies
-        time_mask_param : int
-            max length of mask
-        mask_p : float
-            proportion of time to be masked
+        freq_mask_param : int, optional
+            max consectutive masked frequencies, by default 2
+        time_mask_param : int, optional
+            max length of mask, by default 10
+        mask_p : float, optional
+            proportion of time to be masked, by default 0.5
         """
         super().__init__()
                 
         self.time_mask = torchaudio.transforms.TimeMasking(time_mask_param=time_mask_param, p=mask_p)
         self.freq_mask = torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_param)
         
-    def forward(self, spectrogram):
+    def forward(self, spectrogram, augment=True):
         # device = spectrogram.device #do I need to(device)? #TODO
+        if not augment:
+            return spectrogram
         masked = self.time_mask(spectrogram).to(spectrogram.device)
         masked = self.freq_mask(masked).to(spectrogram.device)
         return masked
     
-class MaestroPipeline(torch.nn.Module):
-    def __init__(self):
+class MaestroPreprocessor(torch.nn.Module):
+    def __init__(
+        self,
+        min_gain = 0.5,
+        max_gain = 1.5,
+        max_noise_factor = 0.01,
+        target_sr = 22050,
+        hop_length = 256,
+        f_min = 27.5,
+        n_bins = 88,
+        freq_mask_param = 2,
+        time_mask_param = 10,
+        mask_p = 0.5,
+        waveform_aug_p = 0.5,
+        spectrogram_aug_p = 0.5,
+        ):
+        """
+        Maestro Preprocessing
+
+        Parameters
+        ----------
+        min_gain : float, optional
+            min volume multiplier, by default 0.5
+        max_gain : float, optional
+            max volume multiplier, by default 1.5
+        max_noise_factor : float, optional
+            background noise amplitude, by default 0.01
+        target_sr : int, optional
+            Target sampling rate (captures frequencies up to target_sr/2), by default 22050
+        hop_length : int, optional
+            Number of time samples in each frame, by default 256
+        f_min : float, optional
+            minimum frequency
+        n_bins : int, optional
+            number of frequency bins, by default 84
+        freq_mask_param : int, optional
+            max consectutive masked frequencies, by default 2
+        time_mask_param : int, optional
+            max length of mask, by default 10
+        mask_p : float, optional
+            proportion of time to be masked, by default 0.5
+        waveform_aug_p : float, optional
+            probability of augmenting waveform [0,1], by default 0.5
+        spectrogram_aug_p : float, optional
+            probability of augmenting spectrogram [0,1], by default 0.5
+        """
         super().__init__()
         
-        self.augmenter = WaveformAugmenter()
-        self.cqt = CQTPreprocessor(n_bins=88)
-        self.spec_aug = SpectAugmenter()
+        self.target_sr = target_sr
+        self.hop_length = hop_length
+        self.waveform_aug_p = waveform_aug_p
+        self.spectrogram_aug_p = spectrogram_aug_p
+
+        self.wave_augmenter = WaveformAugmenter(
+            min_gain=min_gain, 
+            max_gain=max_gain, 
+            max_noise_factor=max_noise_factor
+        )
+        self.cqt = CQTPreprocessor(
+            target_sr=target_sr, 
+            hop_length=hop_length, 
+            f_min=f_min, 
+            n_bins=n_bins
+        )
+        self.spec_aug = SpectAugmenter(
+            freq_mask_param=freq_mask_param, 
+            time_mask_param=time_mask_param, 
+            mask_p=mask_p
+        )
         
-    def forward(self, waveform, orig_sr):
-        x = self.augmenter(waveform)
+        
+    def process_audio(self, waveform, orig_sr, augment=True, debug = False):
+        """
+        return masked_cqt, unless debug is true, then return masked_cqt and raw_cqt.
+        """
+        random = torch.rand(2)
+        x = waveform #augmented tensor
+        
+        # augment waveform
+        if augment and random[0] < self.waveform_aug_p:
+            x = self.wave_augmenter(x, augment)
+            
+        # do CQT    
         x = self.cqt(x, orig_sr)
-        x = self.spec_aug(x)
         
+        # augment spectrogram
+        if augment and random[1] < self.spectrogram_aug_p:
+            x = self.spec_aug(x, augment)
+        
+        if debug:
+            raw_cqt = self.cqt(waveform, orig_sr)
+            return x, raw_cqt
         return x
+    
+    
+    def process_midi(self, midi_path, audio_frames):
+        """
+        converts MIDI file to binary 2D PyTorch tensor aligned to the audio CQT.
+        """
+        fs = self.target_sr / self.hop_length # sampling frequency same as CQT
+        pm = pretty_midi.PrettyMIDI(midi_path)
+        
+        #  defaults to 128 notes
+        piano_roll = pm.get_piano_roll(fs=fs) # type: ignore
+        piano_roll_88 = piano_roll[21:109, :] # slice 88 pianos keys (A0=MIDI note 21, C8 = 108)
+        
+        #binarize notes. 1=on, 0=off
+        binary_roll = (piano_roll_88 > 0).astype(np.float32) #TODO try and keep note velocity. might be too complicated
+        label_tensor = torch.from_numpy(binary_roll)
+        
+        # truncate/pad midi to match audio if need be.
+        midi_frames = label_tensor.shape[1]
+        
+        if midi_frames > audio_frames:
+            label_tensor = label_tensor[:, :audio_frames]
+        elif midi_frames < audio_frames:
+            padding = int (audio_frames - midi_frames)
+            label_tensor = torch.nn.functional.pad(label_tensor, (0, padding))
+            
+        label_tensor = label_tensor.unsqueeze(0) # match 1 channel dimension [1, 88, audio_frames]
+        
+        return label_tensor
+        
+        
+    def forward(self, waveform, orig_sr, midi_path=None, augment=True, debug=False):
+        audio_out = self.process_audio(waveform, orig_sr, augment, debug)
+        
+        if midi_path is None:
+            return audio_out
+        
+        cqt = audio_out[0] if debug else audio_out
+        audio_frames = cqt.shape[-1] #type: ignore
+        
+        label_tensor = self.process_midi(midi_path, audio_frames)
+        
+        if debug:
+            return audio_out[0], audio_out[1], label_tensor
+        
+        return audio_out, label_tensor
