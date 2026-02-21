@@ -11,12 +11,15 @@ ds = load_metadata(maestro_path)
 maestro = MaestroPreprocessor().to(device)
 
 # preprocess audio
-for i, song in enumerate(ds[:1]):
+for i, song in enumerate(ds[:4]):
 
     waveform, orig_sr = torchaudio.load(song.audio_path)
     waveform = waveform.to(device)
     
-    augmented_cqt, labels = maestro(waveform, orig_sr, midi_path=song.midi_path, augment=True)
-    labels  =labels.to(device)
-
+    x, y = maestro(waveform, orig_sr, midi_path=song.midi_path, augment=True)
+    y  =y.to(device)
+    
+    print(f"{x.shape=}")
+    print(f"{y.shape=}")
+    
     print(f"done {i}")

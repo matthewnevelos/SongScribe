@@ -249,23 +249,23 @@ class MaestroPreprocessor(torch.nn.Module):
         return masked_cqt, unless debug is true, then return masked_cqt and raw_cqt.
         """
         random = torch.rand(2)
-        x = waveform #augmented tensor
+        augmented = waveform #augmented tensor
         
         # augment waveform
         if augment and random[0] < self.waveform_aug_p:
-            x = self.wave_augmenter(x, augment)
+            augmented = self.wave_augmenter(augmented, augment)
             
         # do CQT    
-        x = self.cqt(x, orig_sr)
+        augmented = self.cqt(augmented, orig_sr)
         
         # augment spectrogram
         if augment and random[1] < self.spectrogram_aug_p:
-            x = self.spec_aug(x, augment)
+            augmented = self.spec_aug(augmented, augment)
         
         if debug:
             raw_cqt = self.cqt(waveform, orig_sr)
-            return x, raw_cqt
-        return x
+            return augmented, raw_cqt
+        return augmented
     
     
     def process_midi(self, midi_path, audio_frames):
@@ -298,17 +298,19 @@ class MaestroPreprocessor(torch.nn.Module):
         
         
     def forward(self, waveform, orig_sr, midi_path=None, augment=True, debug=False):
-        audio_out = self.process_audio(waveform, orig_sr, augment, debug)
+        x_cqt = self.process_audio(waveform=waveform, orig_sr=orig_sr, augment=augment, debug=debug)
         
         if midi_path is None:
-            return audio_out
-        
-        cqt = audio_out[0] if debug else audio_out
-        audio_frames = cqt.shape[-1] #type: ignore
-        
-        label_tensor = self.process_midi(midi_path, audio_frames)
+            return x_cqt
         
         if debug:
-            return audio_out[0], audio_out[1], label_tensor
+            audio_frames = x_cqt[0].shape[-1]
+        else:
+            audio_frames = x_cqt.shape[-1] #type: ignore
         
-        return audio_out, label_tensor
+        y_cqt = self.process_midi(midi_path, audio_frames)
+        
+        if debug:
+            return *x_cqt, y_cqt
+        
+        return x_cqt, y_cqt
