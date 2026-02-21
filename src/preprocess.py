@@ -3,9 +3,12 @@ import csv
 from dataclasses import dataclass
 import torch
 import torchaudio
+import torchvision
+import torch.nn.functional as F
 from nnAudio.features.cqt import CQT1992v2
 import pretty_midi
 import numpy as np
+
 
 
 @dataclass
@@ -145,49 +148,147 @@ class CQTPreprocessor(torch.nn.Module):
         
         return cqt_spectrogram
     
-
-class SpectAugmenter(torch.nn.Module):
-    def __init__(self, freq_mask_param = 2, time_mask_param = 10, mask_p = 0.5):
+class _SpectAxisAugmenter(torch.nn.Module):
+    def __init__(self, axis, sparsity = 0.1):
         """
-        Mask some of the scpectrogram
+        _summary_
 
         Parameters
         ----------
-        freq_mask_param : int, optional
-            max consectutive masked frequencies, by default 2
-        time_mask_param : int, optional
-            max length of mask, by default 10
-        mask_p : float, optional
-            proportion of time to be masked, by default 0.5
+        axis : int
+            -2 for frquency, -1 for time
+        sparsity : float
+            ratio of lines zeroed out [0.0, 1)
+        """
+        super().__init__()
+        self.axis = axis
+        self.sparsity = sparsity
+    
+    def forward(self, spectrogram, augment = True):
+        if not augment or self.sparsity <= 0.0:
+            return spectrogram
+
+        masked = spectrogram.clone()
+        axis_size = masked.shape[self.axis]
+        
+        probabilities = torch.rand(axis_size, device=masked.device)
+        lines_to_drop = probabilities < self.sparsity
+
+            
+        if self.axis == -1: # time axis
+            masked[..., :, lines_to_drop] = 0.0
+        elif self.axis == -2: # frequency axis
+            masked[..., lines_to_drop, :] = 0.0
+            
+        return masked
+        
+    
+class SpectFreqAugmenter(_SpectAxisAugmenter):
+    def __init__(self, sparsity):
+        super().__init__(sparsity=sparsity, axis=-2)
+    
+class SpectTimeAugmenter(_SpectAxisAugmenter):
+    def __init__(self, sparsity):
+        super().__init__(sparsity=sparsity, axis=-1)
+
+
+class SpectChunkAugmenter(torch.nn.Module):
+    def __init__(self, sparsity=0.1, freq_size = (2,8), time_size = (5,20)):        
+        """
+        DropBlock algorithm designed with rectangular blocks. 
+        largely the same as https://docs.pytorch.org/vision/main/_modules/torchvision/ops/drop_block.html#DropBlock2d
+
+        - create tensor of 0's
+        - randomly place `gamma` number of seeds as 1's in the tensor.
+        - use max pooling to "grow" them to chunk_freq x chunk_time sized blocks of 1's
+        
+        Parameters
+        ----------
+        sparsity : float
+            approximate percentage of the spectrogram to mask [0, 1)
+        freq_size : tuple[int, int]
+            The min/max height of the chunks
+        time_size : tuple[int, int]
+            The min/max width of the chunks
+        """
+        super().__init__()
+        self.sparsity = sparsity
+        self.min_freq, self.max_freq = freq_size
+        self.min_time, self.max_time = time_size
+
+    def forward(self, spectrogram, augment=True):
+        if not augment or self.sparsity <= 0.0:
+            return spectrogram
+
+        masked = spectrogram.clone()
+        orig_shape = masked.shape
+        
+        while masked.ndim < 4:
+            masked = masked.unsqueeze(0)
+
+        # randomly select chunk size
+        chunk_freq = int(torch.randint(self.min_freq, self.max_freq + 1, (1,)).item())
+        chunk_time = int(torch.randint(self.min_time, self.max_time + 1, (1,)).item())
+
+        chunk_area = chunk_freq * chunk_time
+        gamma = self.sparsity / chunk_area
+
+        #place seeds
+        seeds = (torch.rand_like(masked) < gamma).float()
+
+        pad_left, pad_right = 0, chunk_time - 1
+        pad_top, pad_bottom = 0, chunk_freq - 1
+        
+        padded_seeds = F.pad(seeds, (pad_left, pad_right, pad_top, pad_bottom))
+        
+        # grow seeds with pooling
+        chunk_mask = F.max_pool2d(
+            padded_seeds, 
+            kernel_size=(chunk_freq, chunk_time), 
+            stride=1
+        )
+
+        masked = masked * (1.0 - chunk_mask)
+        return masked.view(orig_shape)
+
+class SpectAugmenter(torch.nn.Module):
+    def __init__(self, freq_sparsity, time_sparsity, chunk_sparsity, freq_chunk_size, time_chunk_size):
+        """
+        mask lines of constant freqeucny  / time based on random sparsity.
         """
         super().__init__()
                 
-        self.time_mask = torchaudio.transforms.TimeMasking(time_mask_param=time_mask_param, p=mask_p)
-        self.freq_mask = torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_param)
+        self.freq_mask = SpectFreqAugmenter(sparsity = freq_sparsity)
+        self.time_mask = SpectTimeAugmenter(sparsity = time_sparsity)
+        self.chunk_mask = SpectChunkAugmenter(sparsity = chunk_sparsity, freq_size=freq_chunk_size, time_size=time_chunk_size)
         
     def forward(self, spectrogram, augment=True):
-        # device = spectrogram.device #do I need to(device)? #TODO
         if not augment:
             return spectrogram
         masked = self.time_mask(spectrogram).to(spectrogram.device)
         masked = self.freq_mask(masked).to(spectrogram.device)
+        masked = self.chunk_mask(masked).to(spectrogram.device)
         return masked
     
 class MaestroPreprocessor(torch.nn.Module):
     def __init__(
         self,
-        min_gain = 0.5,
+        min_gain = 0.5, #waveform aug
         max_gain = 1.5,
         max_noise_factor = 0.01,
-        target_sr = 22050,
+        waveform_aug_p = 1,
+        
+        target_sr = 22050, #CQT
         hop_length = 256,
         f_min = 27.5,
         n_bins = 88,
-        freq_mask_param = 2,
-        time_mask_param = 10,
-        mask_p = 0.5,
-        waveform_aug_p = 0.5,
-        spectrogram_aug_p = 0.5,
+        
+        freq_sparsity = 0.1, #CQT augment
+        time_sparsity = 0.2, 
+        chunk_sparsity = 0.2, 
+        freq_chunk_size = (1, 5), 
+        time_chunk_size = (1, 20),
+        spectrogram_aug_p = 1,
         ):
         """
         Maestro Preprocessing
@@ -200,6 +301,9 @@ class MaestroPreprocessor(torch.nn.Module):
             max volume multiplier, by default 1.5
         max_noise_factor : float, optional
             background noise amplitude, by default 0.01
+        waveform_aug_p : float, optional
+            probability of augmenting waveform [0,1], by default 0.5
+            
         target_sr : int, optional
             Target sampling rate (captures frequencies up to target_sr/2), by default 22050
         hop_length : int, optional
@@ -208,14 +312,17 @@ class MaestroPreprocessor(torch.nn.Module):
             minimum frequency
         n_bins : int, optional
             number of frequency bins, by default 84
-        freq_mask_param : int, optional
-            max consectutive masked frequencies, by default 2
-        time_mask_param : int, optional
-            max length of mask, by default 10
-        mask_p : float, optional
-            proportion of time to be masked, by default 0.5
-        waveform_aug_p : float, optional
-            probability of augmenting waveform [0,1], by default 0.5
+            
+        freq_sparsity : float, optional
+            sparsity of frequency rows, by default 0.1
+        time_sparsity : float, optional
+            sparsity of time columns, by default 0.2
+        chunk_sparsity : float, optional
+            average area of chunk mask, by default 0.2
+        freq_chunk_size : tuple[float, float], optional
+            bounds on chunk height
+        time_chunk_size : tuple[float, float], optional
+            bounds on chunk width
         spectrogram_aug_p : float, optional
             probability of augmenting spectrogram [0,1], by default 0.5
         """
@@ -238,9 +345,11 @@ class MaestroPreprocessor(torch.nn.Module):
             n_bins=n_bins
         )
         self.spec_aug = SpectAugmenter(
-            freq_mask_param=freq_mask_param, 
-            time_mask_param=time_mask_param, 
-            mask_p=mask_p
+            freq_sparsity=freq_sparsity, 
+            time_sparsity=time_sparsity, 
+            chunk_sparsity=chunk_sparsity, 
+            freq_chunk_size=freq_chunk_size, 
+            time_chunk_size=time_chunk_size
         )
         
         
@@ -259,7 +368,7 @@ class MaestroPreprocessor(torch.nn.Module):
         augmented = self.cqt(augmented, orig_sr)
         
         # augment spectrogram
-        if augment and random[1] < self.spectrogram_aug_p:
+        if augment and random[1] < self.spectrogram_aug_p: #TODO split augmentation probability into time, freq, chunk
             augmented = self.spec_aug(augmented, augment)
         
         if debug:
@@ -311,6 +420,6 @@ class MaestroPreprocessor(torch.nn.Module):
         y_cqt = self.process_midi(midi_path, audio_frames)
         
         if debug:
-            return *x_cqt, y_cqt
+            return x_cqt, y_cqt
         
         return x_cqt, y_cqt
