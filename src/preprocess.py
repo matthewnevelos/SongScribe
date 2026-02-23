@@ -3,11 +3,11 @@ import csv
 from dataclasses import dataclass
 import torch
 import torchaudio
-import torchvision
 import torch.nn.functional as F
 from nnAudio.features.cqt import CQT1992v2
 import pretty_midi
 import numpy as np
+from tqdm import tqdm
 
 
 
@@ -305,7 +305,7 @@ class MaestroPreprocessor(torch.nn.Module):
             probability of augmenting waveform [0,1], by default 0.5
             
         target_sr : int, optional
-            Target sampling rate (captures frequencies up to target_sr/2), by default 22050
+            resampling rate (captures frequencies up to target_sr/2), by default 22050
         hop_length : int, optional
             Number of time samples in each frame, by default 256
         f_min : float, optional
@@ -332,6 +332,8 @@ class MaestroPreprocessor(torch.nn.Module):
         self.hop_length = hop_length
         self.waveform_aug_p = waveform_aug_p
         self.spectrogram_aug_p = spectrogram_aug_p
+        
+        self.frames_per_seconds = self.target_sr / self.hop_length
 
         self.wave_augmenter = WaveformAugmenter(
             min_gain=min_gain, 
@@ -353,9 +355,9 @@ class MaestroPreprocessor(torch.nn.Module):
         )
         
         
-    def process_audio(self, waveform, orig_sr, augment=True, debug = False):
+    def forward(self, waveform, orig_sr, augment=True, debug = False):
         """
-        return masked_cqt, unless debug is true, then return masked_cqt and raw_cqt.
+        return augmented CQT, unless debug is true, then return augmented CQT and raw_cqt.
         """
         random = torch.rand(2)
         augmented = waveform #augmented tensor
@@ -375,51 +377,33 @@ class MaestroPreprocessor(torch.nn.Module):
             raw_cqt = self.cqt(waveform, orig_sr)
             return augmented, raw_cqt
         return augmented
+
     
-    
-    def process_midi(self, midi_path, audio_frames):
-        """
-        converts MIDI file to binary 2D PyTorch tensor aligned to the audio CQT.
-        """
-        fs = self.target_sr / self.hop_length # sampling frequency same as CQT
-        pm = pretty_midi.PrettyMIDI(midi_path)
-        
-        #  defaults to 128 notes
-        piano_roll = pm.get_piano_roll(fs=fs) # type: ignore
-        piano_roll_88 = piano_roll[21:109, :] # slice 88 pianos keys (A0=MIDI note 21, C8 = 108)
-        
-        #binarize notes. 1=on, 0=off
-        binary_roll = (piano_roll_88 > 0).astype(np.float32) #TODO try and keep note velocity. might be too complicated
-        label_tensor = torch.from_numpy(binary_roll)
-        
-        # truncate/pad midi to match audio if need be.
-        midi_frames = label_tensor.shape[1]
-        
-        if midi_frames > audio_frames:
-            label_tensor = label_tensor[:, :audio_frames]
-        elif midi_frames < audio_frames:
-            padding = int (audio_frames - midi_frames)
-            label_tensor = torch.nn.functional.pad(label_tensor, (0, padding))
+    def precompute_midi_labels(self, output_dir, metadata):                
+        for row in tqdm(metadata, desc="Converting MIDIs to Tensors"):
+            # Recreate the MAESTRO folder structure in the output directory
+            rel_path = Path(row.midi_filename)
+            save_path = output_dir / rel_path.with_suffix('.midi.tensor')
+            save_path.parent.mkdir(parents=True, exist_ok=True)
             
-        label_tensor = label_tensor.unsqueeze(0) # match 1 channel dimension [1, 88, audio_frames]
-        
-        return label_tensor
-        
-        
-    def forward(self, waveform, orig_sr, midi_path=None, augment=True, debug=False):
-        x_cqt = self.process_audio(waveform=waveform, orig_sr=orig_sr, augment=augment, debug=debug)
-        
-        if midi_path is None:
-            return x_cqt
-        
-        if debug:
-            audio_frames = x_cqt[0].shape[-1]
-        else:
-            audio_frames = x_cqt.shape[-1] #type: ignore
-        
-        y_cqt = self.process_midi(midi_path, audio_frames)
-        
-        if debug:
-            return x_cqt, y_cqt
-        
-        return x_cqt, y_cqt
+            if save_path.exists():
+                continue
+                
+            try:
+                pm = pretty_midi.PrettyMIDI(str(row.midi_path))
+                piano_roll = pm.get_piano_roll(fs=self.frames_per_seconds) #type: ignore
+                
+                # piano roll defaults to 128 notes
+                piano_roll_88 = piano_roll[21:109, :] # slice 88 pianos keys (A0=MIDI note 21, C8 = 108)
+                
+                # binarize any value greater than 0
+                binary_roll = (piano_roll_88 > 0).astype(np.float32)
+                
+                label_tensor = torch.from_numpy(binary_roll)
+                torch.save(label_tensor, save_path)
+                
+            except Exception as e:
+                print(f"Failed to process {row.midi_filename}: {e}")
+
+if __name__ == "__main__":
+    MAESTRO_DATA_DIR = r"D:/databases/maestro-v3.0.0"
