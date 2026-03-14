@@ -59,7 +59,7 @@ def load_metadata(maestro_path: str) -> list[MaestroMetadata]:
 class WaveformAugmenter(torch.nn.Module):
     def __init__(self, min_gain=0.5, max_gain=1.5, max_noise_factor=0.01):
         """
-        control input gain and background sound.
+        control input gain and background noise.
         
         Parameters
         ----------
@@ -112,9 +112,9 @@ class CQTPreprocessor(torch.nn.Module):
         hop_length : int, optional
             Number of time samples in each frame, by default 256
         f_min : float, optional
-            minimum frequency
+            minimum frequency #TODO change with instrument
         n_bins : int, optional
-            number of frequency bins, by default 84
+            number of frequency bins, by default 84 #TODO change with instrument
         """
 
         super().__init__()
@@ -151,7 +151,7 @@ class CQTPreprocessor(torch.nn.Module):
 class _SpectAxisAugmenter(torch.nn.Module):
     def __init__(self, axis, sparsity = 0.1):
         """
-        _summary_
+        Base class for CQT masked autoencoder 
 
         Parameters
         ----------
@@ -333,7 +333,7 @@ class MaestroPreprocessor(torch.nn.Module):
         self.waveform_aug_p = waveform_aug_p
         self.spectrogram_aug_p = spectrogram_aug_p
         
-        self.frames_per_seconds = self.target_sr / self.hop_length
+        self.frames_per_second = self.target_sr / self.hop_length
 
         self.wave_augmenter = WaveformAugmenter(
             min_gain=min_gain, 
@@ -391,7 +391,7 @@ class MaestroPreprocessor(torch.nn.Module):
                 
             try:
                 pm = pretty_midi.PrettyMIDI(str(row.midi_path))
-                piano_roll = pm.get_piano_roll(fs=self.frames_per_seconds) #type: ignore
+                piano_roll = pm.get_piano_roll(fs=self.frames_per_second) #type: ignore
                 
                 # piano roll defaults to 128 notes
                 piano_roll_88 = piano_roll[21:109, :] # slice 88 pianos keys (A0=MIDI note 21, C8 = 108)
