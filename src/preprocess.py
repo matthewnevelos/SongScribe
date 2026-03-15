@@ -31,7 +31,9 @@ class MaestroMetadata:
 def load_metadata(maestro_path: str) -> list[MaestroMetadata]:
     dataset = []
     
+    #csv name must be maestro-v3...
     csv_path = Path(maestro_path) / "maestro-v3.0.0.csv"
+    
     
     with open(csv_path, mode="r", encoding="utf-8") as file:
         reader = csv.DictReader(file)
@@ -50,7 +52,11 @@ def load_metadata(maestro_path: str) -> list[MaestroMetadata]:
                 
                 duration = float(row["duration"])
             )
-            dataset.append(item)
+            
+            if Path(item.midi_path).exists() and Path(item.audio_path).exists():
+                dataset.append(item)
+            else:
+                print(f"Warning: midi or audio file missing {item.audio_path}, {item.midi_path}")
     
     return dataset
 
@@ -404,6 +410,3 @@ class MaestroPreprocessor(torch.nn.Module):
                 
             except Exception as e:
                 print(f"Failed to process {row.midi_filename}: {e}")
-
-if __name__ == "__main__":
-    MAESTRO_DATA_DIR = r"D:/databases/maestro-v3.0.0"

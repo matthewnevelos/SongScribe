@@ -6,11 +6,12 @@ from torch.utils.data import Dataset
 from pathlib import Path
 
 class MaestroDataset(Dataset):
-    def __init__(self, maestro_dir, target_sr, frames_per_second, segment_seconds=5.0):
+    def __init__(self, maestro_dir, target_sr, hop_length, segment_seconds=5.0):
         self.segment_seconds = segment_seconds
-        
         self.sample_rate = target_sr
-        self.frames_per_second = frames_per_second
+        self.hop_length = hop_length
+        
+        self.frames_per_second = self.sample_rate / self.hop_length
         
         self.tensor_dir = Path(maestro_dir).parent / f"midi_{self.sample_rate}"
         
@@ -43,7 +44,7 @@ class MaestroDataset(Dataset):
         waveform, sr = torchaudio.load(
             row.audio_path, 
             frame_offset=start_frame, 
-            num_frames=frames_to_load
+            num_frames=frames_to_load,
         )
         
         if sr != self.sample_rate:
@@ -58,14 +59,13 @@ class MaestroDataset(Dataset):
             padding_needed = self.audio_chunk_frames - waveform.shape[1]
             waveform = torch.nn.functional.pad(waveform, (0, padding_needed))
         
-        chunk_duration_sec = self.audio_chunk_frames / self.sample_rate
-        cqt_frames = int(chunk_duration_sec * self.frames_per_second)
+        cqt_frames = (self.audio_chunk_frames // self.hop_length) +1
 
         midi_path = self.tensor_dir / Path(row.midi_filename).with_suffix(".midi.tensor")
         full_label = torch.load(midi_path, weights_only=True)
 
         #load and slice MIDI piano roll
-        start_time_sec = start_frame / audio_info.sample_rate
+        start_time_sec = start_frame / orig_sr
         start_col = int(start_time_sec * self.frames_per_second)
         end_col = start_col + cqt_frames
                 
