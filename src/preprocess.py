@@ -28,8 +28,12 @@ class MaestroMetadata:
 
 
 
-def load_metadata(maestro_path: str) -> list[MaestroMetadata]:
-    dataset = []
+def load_metadata(maestro_path: str) -> dict[str, list[MaestroMetadata]]:
+    dataset_splits = {
+        "train": [],
+        "validation": [],
+        "test": [],
+    }
     
     #csv name must be maestro-v3...
     csv_path = Path(maestro_path) / "maestro-v3.0.0.csv"
@@ -53,12 +57,13 @@ def load_metadata(maestro_path: str) -> list[MaestroMetadata]:
                 duration = float(row["duration"])
             )
             
-            if Path(item.midi_path).exists() and Path(item.audio_path).exists():
-                dataset.append(item)
+            if Path(item.audio_path).exists():
+                if item.split in dataset_splits:  
+                    dataset_splits[item.split].append(item)
             else:
                 print(f"Warning: midi or audio file missing {item.audio_path}, {item.midi_path}")
     
-    return dataset
+    return dataset_splits
 
 
 

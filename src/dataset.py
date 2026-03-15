@@ -6,10 +6,11 @@ from torch.utils.data import Dataset
 from pathlib import Path
 
 class MaestroDataset(Dataset):
-    def __init__(self, maestro_dir, target_sr, hop_length, segment_seconds=5.0):
+    def __init__(self, maestro_dir, target_sr, hop_length, metadata, segment_seconds=5.0):
         self.segment_seconds = segment_seconds
         self.sample_rate = target_sr
         self.hop_length = hop_length
+        self.metadata = metadata
         
         self.frames_per_second = self.sample_rate / self.hop_length
         
@@ -17,9 +18,6 @@ class MaestroDataset(Dataset):
         
         self.audio_chunk_frames = int(self.segment_seconds * self.sample_rate)
         self.label_chunk_frames = int(self.segment_seconds * self.frames_per_second)
-
-        # Read the CSV into a list of dictionaries
-        self.metadata = load_metadata(maestro_dir)
             
 
     def __len__(self):
