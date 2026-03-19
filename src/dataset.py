@@ -1,7 +1,6 @@
 import random
 import torch
 import torchaudio
-from src.preprocess import load_metadata, MaestroPreprocessor
 from torch.utils.data import Dataset
 from pathlib import Path
 
@@ -18,29 +17,33 @@ class MaestroDataset(Dataset):
         
         self.audio_chunk_frames = int(self.segment_seconds * self.sample_rate)
         self.label_chunk_frames = int(self.segment_seconds * self.frames_per_second)
+        
+        self.index_map = []
+        #chop audio into segments
+        for song_idx, row in enumerate(self.metadata):
+            num_segments = int(row.duration // self.segment_seconds)
             
-
+            for seg_idx in range(num_segments):
+                start_time = seg_idx * self.segment_seconds
+                self.index_map.append((song_idx, start_time))
+            
     def __len__(self):
-        return len(self.metadata)
+        return len(self.index_map)
 
     def __getitem__(self, idx):
-        row = self.metadata[idx]
-
-        # randomly slice song 
-        audio_info = torchaudio.info(row.audio_path)
+        song_idx, start_time = self.index_map[idx]
+        song = self.metadata[song_idx]
+        
+        audio_info = torchaudio.info(song.audio_path)
         orig_sr = audio_info.sample_rate
-        total_audio_frames = audio_info.num_frames
         
         frames_to_load = int(self.segment_seconds * orig_sr)
-                
-        if total_audio_frames > frames_to_load:
-            start_frame = random.randint(0, total_audio_frames - frames_to_load)
-        else:
-            start_frame = 0
+        start_frame = int(orig_sr * start_time)
+        
 
         #load just the `segment_seconds` chunk
         waveform, sr = torchaudio.load(
-            row.audio_path, 
+            song.audio_path, 
             frame_offset=start_frame, 
             num_frames=frames_to_load,
         )
@@ -59,7 +62,7 @@ class MaestroDataset(Dataset):
         
         cqt_frames = (self.audio_chunk_frames // self.hop_length) +1
 
-        midi_path = self.tensor_dir / Path(row.midi_filename).with_suffix(".midi.tensor")
+        midi_path = self.tensor_dir / Path(song.midi_filename).with_suffix(".midi.tensor")
         full_label = torch.load(midi_path, weights_only=True)
 
         #load and slice MIDI piano roll
