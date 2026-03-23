@@ -147,8 +147,8 @@ class CQTPreprocessor(torch.nn.Module):
         device = waveform.device
         
         # convert stereo to mono
-        if waveform.shape[0] > 1:
-            waveform = torch.mean(waveform, dim=0, keepdim=True)
+        #if waveform.shape[0] > 1:
+        #    waveform = torch.mean(waveform, dim=0, keepdim=True)
             
         # downsample
         if orig_sr not in self.resamplers:
