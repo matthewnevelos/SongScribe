@@ -1,6 +1,6 @@
 from src.preprocess import MaestroPreprocessor, load_metadata
 from src.dataset import MaestroDataset
-from src.models import PianoTranscriptionCNN
+from src.models import PianoTranscriptionCRNN
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -69,7 +69,7 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     # 1. Initialize Model, Loss, and Optimizer
     # Note: Adjust freq_bins if you altered the default nnAudio CQT parameters
-    model = PianoTranscriptionCNN(freq_bins=88).to(device) 
+    model = PianoTranscriptionCRNN(freq_bins=88).to(device) 
     criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
     
