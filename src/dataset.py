@@ -60,7 +60,7 @@ class MaestroDataset(Dataset):
             padding_needed = self.audio_chunk_frames - waveform.shape[1]
             waveform = torch.nn.functional.pad(waveform, (0, padding_needed))
         
-        cqt_frames = (self.audio_chunk_frames // self.hop_length) +1
+        cqt_frames = (self.audio_chunk_frames // self.hop_length) + 1
 
         midi_path = self.tensor_dir / Path(song.midi_filename).with_suffix(".midi.tensor")
         full_label = torch.load(midi_path, weights_only=True)
@@ -72,9 +72,17 @@ class MaestroDataset(Dataset):
                 
         label_chunk = full_label[:, start_col:end_col]
         
-        if label_chunk.shape[1] < cqt_frames:
-            padding_size = cqt_frames - label_chunk.shape[1]
-            padding = torch.zeros((88, padding_size), dtype=torch.float32)
-            label_chunk = torch.cat((label_chunk, padding), dim=1)
+        if label_chunk.shape[1] > cqt_frames:
+            label_chunk = label_chunk[:, :cqt_frames]
+        elif label_chunk.shape[1] < cqt_frames:
+            padding_needed = cqt_frames - label_chunk.shape[1]
+            # Pad the right side of the time dimension with zeros
+            label_chunk = torch.nn.functional.pad(label_chunk, (0, padding_needed))
+
+        #if label_chunk.shape[1] < self.label_chunk_frames:
+        #    padding_needed = self.label_chunk_frames - label_chunk.shape[1]
+        #    #padding = torch.zeros((88, padding_size), dtype=torch.float32)
+        #    #label_chunk = torch.cat((label_chunk, padding), dim=1)
+        #    self.label_chunk = torch.nn.functional.pad(label_chunk, (0, padding_needed))
 
         return waveform.clone(), label_chunk.clone()
