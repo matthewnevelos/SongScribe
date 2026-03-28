@@ -6,9 +6,8 @@ import music21
 from scipy.signal import medfilt
 from pathlib import Path
 
-# Import your custom modules
-from src.models import PianoTranscriptionCRNN
-from src.preprocess import MaestroPreprocessor
+from models import PianoTranscriptionCRNN
+from preprocess import MaestroPreprocessor
 
 def tensor_to_midi(prediction_tensor, frames_per_second, output_filepath):
     """
@@ -127,7 +126,7 @@ def transcribe_audio(audio_path, model_path, output_dir, chunk_seconds=5.0):
         score.insert(0, mm)
         
         # 2. Inject the Time Signature (Baa Baa Black Sheep is in 4/4)
-        ts = music21.meter.TimeSignature('4/4')
+        ts = music21.meter.TimeSignature('4/4') #type: ignore
         score.insert(0, ts)
         
         # 3. NOW Quantize, and it will snap to the correct 4/4 grid at 100 BPM
@@ -144,8 +143,8 @@ def transcribe_audio(audio_path, model_path, output_dir, chunk_seconds=5.0):
         print(f"Failed to render sheet music: {e}")
 
 if __name__ == "__main__":
-    AUDIO_FILE = "Sheep.wav"
-    MODEL_WEIGHTS = "piano-model-v2.pth"
-    OUTPUT_FOLDER = "transcriptions"
+    AUDIO_FILE = "test_set/sheep/Sheep.wav"
+    MODEL_WEIGHTS = "trained_models/crnn_1.pth"
+    OUTPUT_FOLDER = "test_set/sheep"
     
     transcribe_audio(AUDIO_FILE, MODEL_WEIGHTS, OUTPUT_FOLDER)
