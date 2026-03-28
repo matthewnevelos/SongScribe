@@ -50,3 +50,14 @@ pip install nnAudio librosa music21 mido mir_eval soundfile matplotlib pretty_mi
 A sheet music renderer is needed for music21. 
 MuseScore Studio for Windows/Mac
 LilyPond for Linux.
+
+### MuseScore installation
+Install [MuseScore](https://musescore.org/en/download/musescore.msi)
+In your environments terminal, type:
+```
+python
+import music21
+music21.configure.run()
+```
+
+Follow the instructions for configuring music21 with MuseScore
