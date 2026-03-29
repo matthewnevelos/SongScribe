@@ -8,7 +8,7 @@ from nnAudio.features.cqt import CQT1992v2
 import pretty_midi
 import numpy as np
 from tqdm import tqdm
-
+import librosa
 
 
 @dataclass
@@ -263,7 +263,7 @@ class SpectChunkAugmenter(torch.nn.Module):
         return masked.view(orig_shape)
 
 class SpectAugmenter(torch.nn.Module):
-    def __init__(self, freq_sparsity, time_sparsity, chunk_sparsity, freq_chunk_size, time_chunk_size):
+    def __init__(self, freq_sparsity, time_sparsity, mask_sparsity, freq_mask_range, time_mask_range):
         """
         mask lines of constant freqeucny  / time based on random sparsity.
         """
@@ -271,7 +271,7 @@ class SpectAugmenter(torch.nn.Module):
                 
         self.freq_mask = SpectFreqAugmenter(sparsity = freq_sparsity)
         self.time_mask = SpectTimeAugmenter(sparsity = time_sparsity)
-        self.chunk_mask = SpectChunkAugmenter(sparsity = chunk_sparsity, freq_size=freq_chunk_size, time_size=time_chunk_size)
+        self.chunk_mask = SpectChunkAugmenter(sparsity = mask_sparsity, freq_size=freq_mask_range, time_size=time_mask_range)
         
     def forward(self, spectrogram, augment=True):
         if not augment:
@@ -296,9 +296,9 @@ class MaestroPreprocessor(torch.nn.Module):
         
         freq_sparsity = 0.1, #CQT augment
         time_sparsity = 0.2, 
-        chunk_sparsity = 0.2, 
-        freq_chunk_size = (1, 5), 
-        time_chunk_size = (1, 20),
+        mask_sparsity = 0.2, 
+        freq_mask_range = (1, 5), 
+        time_mask_range = (1, 20),
         spectrogram_aug_p = 1,
         ):
         """
@@ -328,12 +328,12 @@ class MaestroPreprocessor(torch.nn.Module):
             sparsity of frequency rows, by default 0.1
         time_sparsity : float, optional
             sparsity of time columns, by default 0.2
-        chunk_sparsity : float, optional
-            average area of chunk mask, by default 0.2
-        freq_chunk_size : tuple[float, float], optional
-            bounds on chunk height
-        time_chunk_size : tuple[float, float], optional
-            bounds on chunk width
+        mask_sparsity : float, optional
+            average area of mask chunk, by default 0.2
+        freq_mask_range : tuple[float, float], optional
+            bounds on mask height
+        time_mask_range : tuple[float, float], optional
+            bounds on mask width
         spectrogram_aug_p : float, optional
             probability of augmenting spectrogram [0,1], by default 0.5
         """
@@ -360,9 +360,9 @@ class MaestroPreprocessor(torch.nn.Module):
         self.spec_aug = SpectAugmenter(
             freq_sparsity=freq_sparsity, 
             time_sparsity=time_sparsity, 
-            chunk_sparsity=chunk_sparsity, 
-            freq_chunk_size=freq_chunk_size, 
-            time_chunk_size=time_chunk_size
+            mask_sparsity=mask_sparsity, 
+            freq_mask_range=freq_mask_range, 
+            time_mask_range=time_mask_range
         )
         
         
@@ -415,3 +415,10 @@ class MaestroPreprocessor(torch.nn.Module):
                 
             except Exception as e:
                 print(f"Failed to process {row.midi_filename}: {e}")
+                
+def get_bpm(waveform, sample_rate):
+    # waveform must be numpy array
+    waveform = waveform.squeeze().cpu().numpy()
+    tempo, _ = librosa.beat.beat_track(y=waveform, sr=sample_rate)
+    estimated_bpm = int(tempo[0]) if isinstance(tempo, np.ndarray) else int(tempo)
+    return estimated_bpm
