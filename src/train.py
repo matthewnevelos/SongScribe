@@ -9,7 +9,7 @@ import torch.optim as optim
 from pathlib import Path
 from .evaluate import evaluate_model
 
-def train_model(model, preprocessor, train_loader, val_loader, epochs=5, lr=1e-4, save_dir="trained_models"):
+def train_model(model, preprocessor, train_loader, val_loader, epochs=5, lr=1e-4, save_dir="trained_models", model_name=None):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     print(f"Initializing model on {device}...")
@@ -21,10 +21,13 @@ def train_model(model, preprocessor, train_loader, val_loader, epochs=5, lr=1e-4
 
     best_val_loss = float('inf')
     save_dir = Path(save_dir)
-    model_name = model.__class__.__name__
     save_dir.mkdir(parents=True, exist_ok=True)
-    model_iteration = len(list(save_dir.glob(f"{model_name}*")))
-    model_path = save_dir / f"{model_name}_v{model_iteration+1}.pth"
+    if model_name is None:
+        model_name = model.__class__.__name__
+        model_iteration = len(list(save_dir.glob(f"{model_name}*")))
+        model_path = save_dir / f"{model_name}_v{model_iteration+1}.pth"
+    else:
+        model_path = save_dir / model_name
     print(f"Weights will be saved to: {model_path}")
 
     for epoch in range(epochs):
