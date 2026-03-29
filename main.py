@@ -52,8 +52,14 @@ test_dataloader = DataLoader(
 if __name__ == "__main__":
     model = PianoTranscriptionCRNN().to(device)
     
-    train_model(
+    model = train_model(
         model,
         preprocessor, 
         train_dataloader,
-        valid_dataloader)
+        valid_dataloader,
+        epochs=1)
+    
+    # state_dict = torch.load("trained_models/PianoTranscriptionCRNN_v1.pth", map_location=device, weights_only=True)
+    # model.load_state_dict(state_dict)
+    
+    metrics = evaluate_model(model, test_dataloader, threshold=0.5)
