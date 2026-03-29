@@ -112,7 +112,7 @@ class WaveformAugmenter(torch.nn.Module):
     
     
 class CQTPreprocessor(torch.nn.Module):
-    def __init__(self, target_sr=22050, hop_length=256, f_min=27.5, n_bins=84):
+    def __init__(self, target_sr=22050, hop_length=256, f_min=27.5, n_bins=88):
         """
         GPU accelerated CQT preprocessing
 
@@ -125,7 +125,7 @@ class CQTPreprocessor(torch.nn.Module):
         f_min : float, optional
             minimum frequency #TODO change with instrument
         n_bins : int, optional
-            number of frequency bins, by default 84 #TODO change with instrument
+            number of frequency bins, by default 88 #TODO change with instrument
         """
 
         super().__init__()
@@ -322,7 +322,7 @@ class MaestroPreprocessor(torch.nn.Module):
         f_min : float, optional
             minimum frequency
         n_bins : int, optional
-            number of frequency bins, by default 84
+            number of frequency bins, by default 88
             
         freq_sparsity : float, optional
             sparsity of frequency rows, by default 0.1
