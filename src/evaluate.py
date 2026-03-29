@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
-from pathlib import Path
 
-def evaluate_model(model, test_loader, threshold=0.5):
+def evaluate_model(model, preprocessor, test_loader, threshold=0.5):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     print(f"\n--- Starting Evaluation on {device} ---")

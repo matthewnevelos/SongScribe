@@ -8,7 +8,7 @@ import functools
 
 
 @functools.lru_cache(maxsize=1)
-def get_cqt_preprocessor(device='cpu', sample_rate=22050, hop_length=256, f_min=27.5, n_bins=84):
+def get_cqt_preprocessor(device='cpu', sample_rate=22050, hop_length=256, f_min=27.5, n_bins=88):
     # cache preprocessor so I dont rebuild ever time audio_to_CQT is called
     preprocessor = CQTPreprocessor(
         target_sr=sample_rate, 
@@ -18,7 +18,7 @@ def get_cqt_preprocessor(device='cpu', sample_rate=22050, hop_length=256, f_min=
     )
     return preprocessor.to(device)
 
-def audio_to_CQT(audio, sample_rate=22050, hop_length=256, f_min=27.5, n_bins=84):
+def audio_to_CQT(audio, sample_rate=22050, hop_length=256, f_min=27.5, n_bins=88):
     current_device = str(audio.device) if hasattr(audio, 'device') else 'cpu'
     preprocessor = get_cqt_preprocessor(
         device=current_device,
@@ -102,5 +102,3 @@ def midi_to_sheet(midi, bpm):
     score.insert(0, ts)
     
     score.quantize([1, 2, 4, 8, 16], inPlace=True)
-
-    score.show() 
