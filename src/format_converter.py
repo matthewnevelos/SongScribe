@@ -1,4 +1,4 @@
-from preprocess import CQTPreprocessor
+from .preprocess import CQTPreprocessor
 import librosa
 import numpy as np
 import pretty_midi
