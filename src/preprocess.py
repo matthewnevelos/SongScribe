@@ -135,7 +135,8 @@ class CQTPreprocessor(torch.nn.Module):
                              hop_length=hop_length, 
                              fmin=f_min, 
                              n_bins=n_bins, 
-                             bins_per_octave=12) #TODO try 2010v2 and check speed/performance
+                             bins_per_octave=12,
+                             verbose=False) #TODO try 2010v2 and check speed/performance
         
         # Cache resamplers
         self.resamplers = {}
