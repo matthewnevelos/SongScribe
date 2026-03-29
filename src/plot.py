@@ -51,3 +51,101 @@ def save_debug_samples(raw_waveform, augmented_waveform, raw_cqt, augmented_cqt,
     plt.close(fig) # Free memory
     
     print(f"Saved audio and plots to {save_path.absolute()}")
+    
+def plot_CQT(CQT, show=False, file_path = None, title=None):
+    arr = CQT.detach().cpu().squeeze().numpy()
+    
+    # convert to dB
+    arr = 10 * np.log10(arr + 1e-4)
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+
+    img1 = ax.imshow(arr, aspect='auto', origin='lower', cmap='magma')
+    
+    # Labeling
+    if title:
+        ax.set_title(title)
+    ax.set_ylabel("Frequency Bins")
+    ax.set_xlabel("Time Frames")
+    fig.colorbar(img1, ax=ax, label="Magnitude (dB)")
+
+    plt.tight_layout()
+
+    if file_path:
+        plt.savefig(file_path, dpi=300)
+
+    if show:
+        plt.show()
+        
+    plt.close(fig)
+        
+def plot_sheet(sheet, show=False, file_path = None):
+    if show:
+        sheet.show()
+
+    if file_path:
+        sheet.write("musicxml", fp=str(file_path))
+
+
+import matplotlib.pyplot as plt
+
+def plot_midi(midi, show=False, file_path=None, title=None):
+    fig, ax = plt.subplots(figsize=(10, 4))
+    
+    # colours for using multiple instruments
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+    
+    max_time = 0
+    min_pitch = 108 # highest piano key
+    max_pitch = 21  # lowest piano key
+    
+    for i, instrument in enumerate(midi.instruments):
+        color = colors[i % len(colors)]
+        label_added = False
+        
+        for note in instrument.notes:
+            ax.plot(
+                [note.start, note.end], 
+                [note.pitch, note.pitch], 
+                color=color, 
+                linewidth=3, 
+                solid_capstyle='butt', #Makes the ends of the lines flat
+                label=instrument.name if not label_added else None
+            )
+            label_added = True
+            
+            # Track the bounds of the song to size the graph perfectly
+            max_time = max(max_time, note.end)
+            min_pitch = min(min_pitch, note.pitch)
+            max_pitch = max(max_pitch, note.pitch)
+
+    if max_time > 0:
+        ax.set_xlim(0, max_time + 0.5)
+        ax.set_ylim(max(21, min_pitch - 3), min(108, max_pitch + 3))
+    else:
+        ax.set_xlim(0, 5)
+        ax.set_ylim(21, 108)
+
+    # Formatting and labels
+    if title:
+        ax.set_title(title)
+    ax.set_xlabel("Time (seconds)")
+    ax.set_ylabel("MIDI Pitch")
+    
+    ax.grid(True, axis='both', linestyle='--', alpha=0.5)
+    
+    # Add a legend if we actually plotted named instruments
+    handles, labels = ax.get_legend_handles_labels()
+    if labels:
+        ax.legend(loc='upper right')
+
+    plt.tight_layout()
+
+    if file_path:
+        plt.savefig(file_path, dpi=300)
+        print(f"Saved MIDI plot to: {file_path}")
+
+    if show:
+        plt.show()
+
+    plt.close(fig)
