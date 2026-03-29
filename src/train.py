@@ -2,8 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from pathlib import Path
-
-
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -16,11 +15,9 @@ def train_model(model, preprocessor, train_loader, val_loader, epochs=5, lr=1e-4
     model = model.to(device)
     preprocessor = preprocessor.to(device)
     
-    # Loss and Optimizer
     criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
-    # Setup Save Directory and Versioning
     best_val_loss = float('inf')
     save_dir = Path(save_dir)
     model_name = model.__class__.__name__
@@ -36,31 +33,23 @@ def train_model(model, preprocessor, train_loader, val_loader, epochs=5, lr=1e-4
         model.train()
         running_train_loss = 0.0
         
-        for batch_idx, (waveforms, labels) in enumerate(train_loader):
+        train_bar = tqdm(train_loader, desc="Training", leave=False)
+        
+        for batch_idx, (waveforms, labels) in enumerate(train_bar):
             waveforms = waveforms.to(device)
             labels = labels.to(device)
             
-            # 1. Batch sizing fix
             if waveforms.dim() == 3:
                 if waveforms.shape[0] == 1 and waveforms.shape[1] > 1:
                     waveforms = waveforms.squeeze(0)
                 else:
                     waveforms = waveforms.squeeze(1)
                     
-            # 2. Preprocess (augment=True for training)
-            # You can access the sample rate directly from the preprocessor's attributes
             spectrograms = preprocessor(waveforms, orig_sr=preprocessor.target_sr, augment=True)
             
-            # 3. Add Channel dimension for CNN: (Batch, 1, Freq, Time)
             if spectrograms.dim() == 3:
                 spectrograms = spectrograms.unsqueeze(1)
-                
-            # 4. Time Syncing
-            min_time = min(spectrograms.shape[-1], labels.shape[-1])
-            spectrograms = spectrograms[:, :, :, :min_time]
-            labels = labels[:, :, :min_time]
-            
-            # 5. Forward and Backprop
+
             optimizer.zero_grad()
             outputs = model(spectrograms)
             loss = criterion(outputs, labels)
@@ -69,9 +58,8 @@ def train_model(model, preprocessor, train_loader, val_loader, epochs=5, lr=1e-4
             
             running_train_loss += loss.item()
             
-            if batch_idx % 100 == 0:
-                print(f"  Batch {batch_idx} | Train Loss: {loss.item():.4f}")
-
+            train_bar.set_postfix({"Loss": f"{loss.item():.4f}"})
+                        
         avg_train_loss = running_train_loss / max(1, len(train_loader))
         
         # --- VALIDATION PHASE ---
@@ -79,19 +67,16 @@ def train_model(model, preprocessor, train_loader, val_loader, epochs=5, lr=1e-4
         running_val_loss = 0.0
         
         with torch.no_grad():
-            # FIX: val_loader yields waveforms, not spectrograms!
             for waveforms, labels in val_loader:
                 waveforms = waveforms.to(device)
                 labels = labels.to(device)
                 
-                # Apply the same dimensional fixes
                 if waveforms.dim() == 3:
                     if waveforms.shape[0] == 1 and waveforms.shape[1] > 1:
                         waveforms = waveforms.squeeze(0)
                     else:
                         waveforms = waveforms.squeeze(1)
                 
-                # Preprocess with augment=False for clean validation
                 spectrograms = preprocessor(waveforms, orig_sr=preprocessor.target_sr, augment=False)
                 
                 if spectrograms.dim() == 3:
