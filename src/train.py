@@ -8,7 +8,7 @@ def train_model(model, train_loader, val_loader, epochs=5, lr=1e-4, save_dir="tr
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     print(f"Initializing model on {device}...")
-    model = model(freq_bins=88).to(device)
+    model = model.to(device)
     
     # Loss and Optimizer
     criterion = nn.BCEWithLogitsLoss()
