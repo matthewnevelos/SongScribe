@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from format_converter import audio_to_CQT
+from .format_converter import audio_to_CQT
 
 def evaluate_model(model, test_loader, threshold=0.5):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
