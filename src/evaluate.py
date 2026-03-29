@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
+from format_converter import audio_to_CQT
 
-def evaluate_model(model, preprocessor, test_loader, threshold=0.5):
+def evaluate_model(model, test_loader, threshold=0.5):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     print(f"\n--- Starting Evaluation on {device} ---")
@@ -20,9 +21,23 @@ def evaluate_model(model, preprocessor, test_loader, threshold=0.5):
 
     #Evaluation Loop
     with torch.no_grad(): 
-        for batch_idx, (spectrograms, labels) in enumerate(test_loader):
-            spectrograms = spectrograms.to(device)
+        for batch_idx, (waveforms, labels) in enumerate(test_loader):
+            waveforms = waveforms.to(device)
             labels = labels.to(device)
+            
+            if waveforms.dim() == 3:
+                if waveforms.shape[0] == 1 and waveforms.shape[1] > 1:
+                    waveforms = waveforms.squeeze(0)
+                    print("Is this ever used")
+                else:
+                    waveforms = waveforms.squeeze(1)
+                    print("Is this ever used")
+                    
+            spectrograms = audio_to_CQT(waveforms)
+            
+            if spectrograms.dim() == 3:
+                spectrograms = spectrograms.unsqeeze(1)
+                print("Is this ever used")
             
             outputs = model(spectrograms)
             loss = criterion(outputs, labels)
