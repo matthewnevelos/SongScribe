@@ -4,36 +4,30 @@ import numpy as np
 import librosa
 from scipy.signal import medfilt
 from pathlib import Path
+from .format_converter import output_to_midi, midi_to_sheet
+from .format_converter import audio_to_CQT
 
-# Import your modular components
-from format_converter import output_to_midi, midi_to_sheet
-from models.crnn import PianoTranscriptionCRNN
-from preprocess import MaestroPreprocessor
 
-def transcribe_audio(audio_path, model_path, output_dir, chunk_seconds=5.0):
+def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, sr = 11050, hop_length=256):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
-    # 1. Load Model and Preprocessor
-    model = PianoTranscriptionCRNN(freq_bins=88).to(device)
-    # Added weights_only=True to resolve the PyTorch security warning
-    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
-    model.eval()
+    #Load Model
+    trained_model = trained_model.to(device)
+    trained_model.eval()
     
-    preprocessor = MaestroPreprocessor().to(device)
-    target_sr = preprocessor.target_sr
-    frames_per_second = target_sr / preprocessor.hop_length
+    frames_per_second = sr / hop_length
     
-    # 2. Load Audio
+    # load audio
     waveform, orig_sr = torchaudio.load(audio_path)
     if waveform.shape[0] > 1:
         waveform = torch.mean(waveform, dim=0, keepdim=True) # Stereo to Mono
-    if orig_sr != target_sr:
-        waveform = torchaudio.functional.resample(waveform, orig_sr, target_sr)
+    if orig_sr != sr:
+        waveform = torchaudio.functional.resample(waveform, orig_sr, sr)
         
     waveform = waveform.to(device)
     
-    # 3. Process in Chunks (to save VRAM) and Concatenate
-    chunk_samples = int(chunk_seconds * target_sr)
+    # process chunk by chunk
+    chunk_samples = int(chunk_seconds * sr)
     all_predictions = []
     
     print(f"Transcribing {audio_path}...")
@@ -46,57 +40,46 @@ def transcribe_audio(audio_path, model_path, output_dir, chunk_seconds=5.0):
                 padding_needed = chunk_samples - wave_chunk.shape[1]
                 wave_chunk = torch.nn.functional.pad(wave_chunk, (0, padding_needed))
             
-            spectrogram = preprocessor(wave_chunk, target_sr, augment=False)
+            spectrogram = audio_to_CQT(wave_chunk, sample_rate=sr, hop_length=hop_length)
             spectrogram = spectrogram.unsqueeze(1)
             
-            outputs = model(spectrogram) 
+            outputs = trained_model(spectrogram) 
             probs = torch.sigmoid(outputs)
             all_predictions.append(probs.squeeze(0))
 
     full_prediction = torch.cat(all_predictions, dim=1)
     
-    original_frames = int((waveform.shape[1] / target_sr) * frames_per_second)
+    original_frames = int((waveform.shape[1] / sr) * frames_per_second)
     full_prediction = full_prediction[:, :original_frames]
     
-    # 4. Smoothing and Post-Processing
-    # Move to CPU and apply median filter to probabilities
+    # Smoothing and Post-Processing
     probs_numpy = full_prediction.cpu().numpy()
     for i in range(probs_numpy.shape[0]):
         probs_numpy[i, :] = medfilt(probs_numpy[i, :], kernel_size=5)
     
-    # 5. Convert to MIDI
+    # Convert to MIDI
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
     midi_path = output_dir / f"{Path(audio_path).stem}_transcribed.mid"
     
-    # Call the new modular function
     midi_obj = output_to_midi(
         raw_output=probs_numpy, 
         threshold=0.5, 
-        sample_rate=target_sr, 
-        hop_length=preprocessor.hop_length
+        sample_rate=sr, 
+        hop_length=hop_length
     )
     midi_obj.write(str(midi_path))
     print(f"Saved MIDI to: {midi_path}")
     
-    # 6. Automate Tempo Detection 
-    print("Estimating tempo from audio...")
+    # Guess tempo 
     y = waveform.squeeze().cpu().numpy()
-    tempo, _ = librosa.beat.beat_track(y=y, sr=target_sr)
+    tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
     estimated_bpm = int(tempo[0]) if isinstance(tempo, np.ndarray) else int(tempo)
-    print(f"Detected Tempo: {estimated_bpm} BPM")
     
-    # 7. Convert to Sheet Music
     print("Converting to Sheet Music...")
     try:
-        # Pass the memory object directly to music21
-        midi_to_sheet(midi_obj, estimated_bpm)
+        sheet = midi_to_sheet(midi_obj, estimated_bpm)
+        sheet_path = output_dir / f"{Path(audio_path).stem}_sheet.xml"
+        sheet.write("musicxml", fp=str(sheet_path))
     except Exception as e:
         print(f"Failed to render sheet music: {e}")
-
-if __name__ == "__main__":
-    AUDIO_FILE = "test_set/sheep/Sheep.wav"
-    MODEL_WEIGHTS = "trained_models/crnn_1.pth"
-    OUTPUT_FOLDER = "test_set/sheep"
-    
-    transcribe_audio(AUDIO_FILE, MODEL_WEIGHTS, OUTPUT_FOLDER)
