@@ -60,7 +60,7 @@ def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, s
     # Convert to MIDI
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
-    midi_path = output_dir / f"{Path(audio_path).stem}_transcribed.mid"
+    midi_path = output_dir / f"{trained_model.__class__.__name__}_transcribed.midi"
     
     midi_obj = output_to_midi(
         raw_output=probs_numpy, 
@@ -79,7 +79,7 @@ def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, s
     print("Converting to Sheet Music...")
     try:
         sheet = midi_to_sheet(midi_obj, estimated_bpm)
-        sheet_path = output_dir / f"{Path(audio_path).stem}_sheet.xml"
+        sheet_path = output_dir / f"{trained_model.__class__.__name__}_sheet.xml"
         sheet.write("musicxml", fp=str(sheet_path))
     except Exception as e:
         print(f"Failed to render sheet music: {e}")
