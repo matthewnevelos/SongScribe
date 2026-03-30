@@ -9,7 +9,7 @@ import torch.optim as optim
 from pathlib import Path
 from .evaluate import evaluate_model
 
-def train_model(model, preprocessor, train_loader, val_loader, epochs=5, lr=1e-4, save_dir="trained_models", model_name=None):
+def train_model(model, preprocessor, train_loader, val_loader, epochs=5, lr=1e-4, save_dir="trained_models", model_name=None, augment=True):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     print(f"Initializing model on {device}...")
@@ -50,7 +50,7 @@ def train_model(model, preprocessor, train_loader, val_loader, epochs=5, lr=1e-4
                 else:
                     waveforms = waveforms.squeeze(1)
                     
-            spectrograms = preprocessor(waveforms, orig_sr=preprocessor.target_sr, augment=True)
+            spectrograms = preprocessor(waveforms, orig_sr=preprocessor.target_sr, augment=augment)
             
             if spectrograms.dim() == 3:
                 spectrograms = spectrograms.unsqueeze(1)
