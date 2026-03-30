@@ -102,3 +102,5 @@ def midi_to_sheet(midi, bpm):
     score.insert(0, ts)
     
     score.quantize([1, 2, 4, 8, 16], inPlace=True)
+    
+    return score
