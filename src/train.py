@@ -37,7 +37,7 @@ def train_model(model, preprocessor, train_loader, val_loader, epochs=5, lr=1e-4
         model.train()
         running_train_loss = 0.0
         
-        train_bar = tqdm(train_loader, desc="Training", leave=False)
+        train_bar = tqdm(train_loader, desc="Training", leave=True)
         
         for batch_idx, (waveforms, labels) in enumerate(train_bar):
             waveforms = waveforms.to(device)

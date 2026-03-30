@@ -19,11 +19,11 @@ def evaluate_model(model, test_loader, threshold=0.5):
     total_fn = torch.tensor(0.0, device=device)
     total_tn = torch.tensor(0.0, device=device)
 
-    val_bar = tqdm(test_loader, desc="Evaluating", leave=False)
+    val_bar = tqdm(test_loader, desc="Evaluating", leave=True)
 
     #Evaluation Loop
     with torch.no_grad(): 
-        for batch_idx, (waveforms, labels) in val_bar:
+        for waveforms, labels in val_bar:
             waveforms = waveforms.to(device)
             labels = labels.to(device)
             
