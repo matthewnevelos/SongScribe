@@ -8,7 +8,7 @@ from .format_converter import output_to_midi, midi_to_sheet, audio_to_CQT
 from .evaluate import hysteresis
 
 
-def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, sr = 11050, hop_length=256):
+def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, sr = 22050, hop_length=256):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     #Load Model
