@@ -52,12 +52,12 @@ def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, s
     original_frames = int((waveform.shape[1] / sr) * frames_per_second)
     full_prediction = full_prediction[:, :original_frames]
     
-    binary_tensor = hysteresis(full_prediction.unsqueeze(0))
+    binary_tensor = hysteresis(full_prediction.unsqueeze(0)).squeeze(0)
     
     # Smoothing and Post-Processing
-    probs_numpy = full_prediction.cpu().numpy()
-    for i in range(probs_numpy.shape[0]):
-        probs_numpy[i, :] = medfilt(probs_numpy[i, :], kernel_size=5)
+    binary_numpy = binary_tensor.cpu().numpy()
+    for i in range(binary_numpy.shape[0]):
+        binary_numpy[i, :] = medfilt(binary_numpy[i, :], kernel_size=5)
     
     # Convert to MIDI
     output_dir = Path(output_dir)
@@ -65,7 +65,7 @@ def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, s
     midi_path = output_dir / f"{trained_model.__class__.__name__}_transcribed.midi"
     
     midi_obj = output_to_midi(
-        raw_output=probs_numpy, 
+        raw_output=binary_numpy, 
         threshold=0.5, 
         sample_rate=sr, 
         hop_length=hop_length
