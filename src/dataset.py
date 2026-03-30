@@ -79,10 +79,4 @@ class MaestroDataset(Dataset):
             # Pad the right side of the time dimension with zeros
             label_chunk = torch.nn.functional.pad(label_chunk, (0, padding_needed))
 
-        #if label_chunk.shape[1] < self.label_chunk_frames:
-        #    padding_needed = self.label_chunk_frames - label_chunk.shape[1]
-        #    #padding = torch.zeros((88, padding_size), dtype=torch.float32)
-        #    #label_chunk = torch.cat((label_chunk, padding), dim=1)
-        #    self.label_chunk = torch.nn.functional.pad(label_chunk, (0, padding_needed))
-
         return waveform.clone(), label_chunk.clone()
