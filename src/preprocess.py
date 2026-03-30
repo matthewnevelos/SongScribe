@@ -402,16 +402,31 @@ class MaestroPreprocessor(torch.nn.Module):
                 
             try:
                 pm = pretty_midi.PrettyMIDI(str(row.midi_path))
-                piano_roll = pm.get_piano_roll(fs=self.frames_per_second) #type: ignore
                 
-                # piano roll defaults to 128 notes
-                piano_roll_88 = piano_roll[21:109, :] # slice 88 pianos keys (A0=MIDI note 21, C8 = 108)
+                time_steps = int(pm.get_end_time() * self.frames_per_second) + 1
+                frame_roll = np.zeros((88, time_steps), dtype=np.float32)
+                onset_roll = np.zeros((88, time_steps), dtype=np.float32)
                 
-                # binarize any value greater than 0
-                binary_roll = (piano_roll_88 > 0).astype(np.float32)
+                for inst in pm.instruments:
+                    if inst.is_drum: continue
+                    for note in inst.notes:
+                        pitch_idx = note.pitch - 21
+                        if 0 <= pitch_idx < 88:
+                            start_frame = int(note.start * self.frames_per_second)
+                            end_frame = int(note.end * self.frames_per_second)
+                            
+                            # Frame label: 1 for the entire duration
+                            frame_roll[pitch_idx, start_frame:end_frame] = 1
+                            
+                            # Onset label: 1 for ONLY the first 2 frames (approx 30-60ms)
+                            onset_roll[pitch_idx, start_frame:min(start_frame+2, time_steps)] = 1
                 
-                label_tensor = torch.from_numpy(binary_roll)
-                torch.save(label_tensor, save_path)
+                # Save both tensors
+                frame_tensor = torch.from_numpy(frame_roll)
+                onset_tensor = torch.from_numpy(onset_roll)
+                
+                torch.save(frame_tensor, save_path) # Save frames normally
+                torch.save(onset_tensor, save_path.with_suffix('.onset.tensor')) # Save onsets
                 
             except Exception as e:
                 print(f"Failed to process {row.midi_filename}: {e}")

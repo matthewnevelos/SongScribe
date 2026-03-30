@@ -31,28 +31,41 @@ class MaestroDataset(Dataset):
         return len(self.index_map)
 
     def __getitem__(self, idx):
-        song_idx, start_time = self.index_map[idx]
-        song = self.metadata[song_idx]
-        
-        audio_info = torchaudio.info(song.audio_path)
-        orig_sr = audio_info.sample_rate
-        
-        frames_to_load = int(self.segment_seconds * orig_sr)
-        start_frame = int(orig_sr * start_time)
+        # FIX: Unpack the correct song index and the start time of the chunk 
+        # from the index map to prevent the out-of-bounds IndexError.
+        song_idx, start_time_sec = self.index_map[idx]
+        row = self.metadata[song_idx]
         
 
-        #load just the `segment_seconds` chunk
+        audio_info = torchaudio.info(row.audio_path)
+        orig_sr = audio_info.sample_rate
+        total_audio_frames = audio_info.num_frames
+        
+        # Calculate exact frames to load based on the index map
+        start_frame = int(start_time_sec * orig_sr)
+        frames_to_load = int(self.segment_seconds * orig_sr)
+        
+        # Safeguard: If this is the final chunk of the song, don't load past the end
+        if start_frame + frames_to_load > total_audio_frames:
+            frames_to_load = total_audio_frames - start_frame
+
         waveform, sr = torchaudio.load(
-            song.audio_path, 
+            row.audio_path, 
             frame_offset=start_frame, 
             num_frames=frames_to_load,
         )
         
-        if sr != self.sample_rate:
-            waveform = torchaudio.functional.resample(waveform, sr, self.sample_rate)
+        # Ensure waveform is always 2D [Channels, Time]
+        if waveform.dim() == 1:
+            waveform = waveform.unsqueeze(0)
+        
+        #if sr != self.sample_rate:
+        #    waveform = torchaudio.functional.resample(waveform, sr, self.sample_rate)
             
-        if waveform.shape[0] > 1:
-            waveform = torch.mean(waveform, dim=0, keepdim=True)
+        #if waveform.shape[0] > 1:
+        #    waveform = torch.mean(waveform, dim=0, keepdim=True)
+
+        # Removed after data resampled to speed up training time
 
         if waveform.shape[1] > self.audio_chunk_frames:
             waveform = waveform[:, :self.audio_chunk_frames]
@@ -62,27 +75,39 @@ class MaestroDataset(Dataset):
         
         cqt_frames = (self.audio_chunk_frames // self.hop_length) + 1
 
-        midi_path = self.tensor_dir / Path(song.midi_filename).with_suffix(".midi.tensor")
-        full_label = torch.load(midi_path, weights_only=True)
+        # Safe path resolution for both tensors
+        midi_path = self.tensor_dir / Path(row.midi_filename).with_suffix(".midi.tensor")
+        onset_path = Path(str(midi_path).replace('.midi.tensor', '.midi.onset.tensor'))
+        
+        full_frame_label = torch.load(midi_path, weights_only=True)
+        full_onset_label = torch.load(onset_path, weights_only=True)
 
-        #load and slice MIDI piano roll
-        start_time_sec = start_frame / orig_sr
+        # Ensure labels are always 2D [88, Time]
+        if full_frame_label.dim() == 1:
+                full_frame_label = full_frame_label.unsqueeze(0)
+        if full_onset_label.dim() == 1:
+                full_onset_label = full_onset_label.unsqueeze(0)
+
+        # Calculate time columns based on the exact start_time_sec
         start_col = int(start_time_sec * self.frames_per_second)
         end_col = start_col + cqt_frames
                 
-        label_chunk = full_label[:, start_col:end_col]
+        # Slice both labels
+        frame_chunk = full_frame_label[:, start_col:end_col]
+        onset_chunk = full_onset_label[:, start_col:end_col]
         
-        if label_chunk.shape[1] > cqt_frames:
-            label_chunk = label_chunk[:, :cqt_frames]
-        elif label_chunk.shape[1] < cqt_frames:
-            padding_needed = cqt_frames - label_chunk.shape[1]
-            # Pad the right side of the time dimension with zeros
-            label_chunk = torch.nn.functional.pad(label_chunk, (0, padding_needed))
-
-        #if label_chunk.shape[1] < self.label_chunk_frames:
-        #    padding_needed = self.label_chunk_frames - label_chunk.shape[1]
-        #    #padding = torch.zeros((88, padding_size), dtype=torch.float32)
-        #    #label_chunk = torch.cat((label_chunk, padding), dim=1)
-        #    self.label_chunk = torch.nn.functional.pad(label_chunk, (0, padding_needed))
-
-        return waveform.clone(), label_chunk.clone()
+        # STRICT PADDING FOR FRAMES
+        if frame_chunk.shape[1] > cqt_frames:
+            frame_chunk = frame_chunk[:, :cqt_frames]
+        elif frame_chunk.shape[1] < cqt_frames:
+            padding_needed = cqt_frames - frame_chunk.shape[1]
+            frame_chunk = torch.nn.functional.pad(frame_chunk, (0, padding_needed))
+            
+        # STRICT PADDING FOR ONSETS
+        if onset_chunk.shape[1] > cqt_frames:
+            onset_chunk = onset_chunk[:, :cqt_frames]
+        elif onset_chunk.shape[1] < cqt_frames:
+            padding_needed = cqt_frames - onset_chunk.shape[1]
+            onset_chunk = torch.nn.functional.pad(onset_chunk, (0, padding_needed))
+            
+        return waveform, frame_chunk, onset_chunk
