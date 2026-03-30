@@ -16,7 +16,9 @@ def train_model(model, preprocessor, train_loader, val_loader, epochs=5, lr=1e-4
     model = model.to(device)
     preprocessor = preprocessor.to(device)
     
-    criterion = nn.BCEWithLogitsLoss()
+    positive_weight = torch.tensor([15.0]).to(device)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=positive_weight)
+    
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
     best_val_loss = float('inf')

@@ -3,6 +3,29 @@ import torch.nn as nn
 from .format_converter import audio_to_CQT
 from tqdm import tqdm
 
+def hysteresis(probabilities, onset = 0.8, frame=0.2):
+
+    # Create an empty tensor for the final binary predictions
+    predictions = torch.zeros_like(probabilities)
+    
+    # Iterate through the time dimension
+    for t in range(probabilities.shape[-1]):
+        if t == 0:
+            # First frame just uses the onset threshold
+            predictions[:, :, t] = (probabilities[:, :, t] > onset).float()
+        else:
+            # A note is ON if:
+            # 1. It crosses the onset threshold right now (new note)
+            # OR
+            # 2. It was ON in the previous frame AND it is currently above the frame threshold (sustaining)
+            
+            new_note = probabilities[:, :, t] > onset
+            sustaining_note = (predictions[:, :, t-1] == 1) & (probabilities[:, :, t] > frame)
+            
+            predictions[:, :, t] = (new_note | sustaining_note).float()
+    return predictions
+
+
 def evaluate_model(model, test_loader, threshold=0.5):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
@@ -10,7 +33,9 @@ def evaluate_model(model, test_loader, threshold=0.5):
 
     model = model.to(device)
     model.eval() 
-    criterion = nn.BCEWithLogitsLoss()
+    
+    positive_weight = torch.tensor([15.0]).to(device) 
+    criterion = nn.BCEWithLogitsLoss(pos_weight=positive_weight)
 
     # Metric Accumulators
     total_loss = 0.0
@@ -47,7 +72,8 @@ def evaluate_model(model, test_loader, threshold=0.5):
             total_loss += loss.item()
             
             probs = torch.sigmoid(outputs)
-            preds = (probs > threshold).float()
+            # preds = (probs > threshold).float()
+            preds = hysteresis(probs)
             
             total_tp += (preds * labels).sum()
             total_fp += (preds * (1 - labels)).sum()

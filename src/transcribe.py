@@ -4,8 +4,8 @@ import numpy as np
 import librosa
 from scipy.signal import medfilt
 from pathlib import Path
-from .format_converter import output_to_midi, midi_to_sheet
-from .format_converter import audio_to_CQT
+from .format_converter import output_to_midi, midi_to_sheet, audio_to_CQT
+from .evaluate import hysteresis
 
 
 def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, sr = 11050, hop_length=256):
@@ -51,6 +51,8 @@ def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, s
     
     original_frames = int((waveform.shape[1] / sr) * frames_per_second)
     full_prediction = full_prediction[:, :original_frames]
+    
+    binary_tensor = hysteresis(full_prediction.unsqueeze(0))
     
     # Smoothing and Post-Processing
     probs_numpy = full_prediction.cpu().numpy()

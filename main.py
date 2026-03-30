@@ -22,9 +22,26 @@ metadata = load_metadata(maestro_path)
 if not processed_dir.exists():
     preprocessor.precompute_midi_labels(processed_dir, sum(metadata.values(), []))
 
-train_dataset = MaestroDataset(maestro_dir=maestro_path, target_sr=preprocessor.target_sr, hop_length=preprocessor.hop_length, metadata=metadata["train"])
-valid_dataset = MaestroDataset(maestro_dir=maestro_path, target_sr=preprocessor.target_sr, hop_length=preprocessor.hop_length, metadata=metadata["validation"])
-test_dataset = MaestroDataset(maestro_dir=maestro_path, target_sr=preprocessor.target_sr, hop_length=preprocessor.hop_length, metadata=metadata["test"])
+train_dataset = MaestroDataset(
+    maestro_dir=maestro_path, 
+    target_sr=preprocessor.target_sr, 
+    hop_length=preprocessor.hop_length, 
+    metadata=metadata["train"],
+    segment_seconds=5)
+
+valid_dataset = MaestroDataset(
+    maestro_dir=maestro_path, 
+    target_sr=preprocessor.target_sr, 
+    hop_length=preprocessor.hop_length, 
+    metadata=metadata["validation"],
+    segment_seconds=5)
+
+test_dataset = MaestroDataset(
+    maestro_dir=maestro_path, 
+    target_sr=preprocessor.target_sr, 
+    hop_length=preprocessor.hop_length, 
+    metadata=metadata["test"],
+    segment_seconds=5)
 
 train_dataloader = DataLoader(
     train_dataset,
@@ -61,15 +78,16 @@ if __name__ == "__main__":
     #     valid_dataloader,
     #     epochs=1)
     
-    state_dict = torch.load("trained_models/PianoUNet_v1.pth", map_location=device, weights_only=True)
+    state_dict = torch.load("trained_models/PianoUNet_v1_v3.pth", map_location=device, weights_only=True)
     model.load_state_dict(state_dict)
     
     AUDIO_FILE = "test_set/sheep/Sheep.wav"
     OUTPUT_FOLDER = "test_set/sheep"
-    
-    # AUDIO_FILE = "test_set/signal flags/Signal Flags.wav"
-    # OUTPUT_FOLDER = "test_set/signal flags"
-    
     sheet = transcribe_audio(AUDIO_FILE, model, OUTPUT_FOLDER)
+    
+    AUDIO_FILE = "test_set/signal flags/Signal Flags.wav"
+    OUTPUT_FOLDER = "test_set/signal flags"
+    sheet = transcribe_audio(AUDIO_FILE, model, OUTPUT_FOLDER)
+    
             
     # metrics = evaluate_model(model, test_dataloader, threshold=0.5)
