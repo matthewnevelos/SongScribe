@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
-from .format_converter import audio_to_CQT
+# from .format_converter import audio_to_CQT
 from tqdm import tqdm
 
-def hysteresis(probabilities, onset = 0.8, frame=0.2):
+def hysteresis(probabilities, onset = 0.9, frame=0.2):
 
     # Create an empty tensor for the final binary predictions
     predictions = torch.zeros_like(probabilities)
@@ -26,7 +26,7 @@ def hysteresis(probabilities, onset = 0.8, frame=0.2):
     return predictions
 
 
-def evaluate_model(model, test_loader, threshold=0.5):
+def evaluate_model(model, test_loader, preprocessor, threshold=0.5):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     print(f"\n--- Starting Evaluation on {device} ---")
@@ -59,7 +59,7 @@ def evaluate_model(model, test_loader, threshold=0.5):
                 else:
                     waveforms = waveforms.squeeze(1)
                     
-            spectrograms = audio_to_CQT(waveforms)
+            spectrograms = preprocessor(waveforms, orig_sr=preprocessor.target_sr, augment=False)
             
             if spectrograms.dim() == 3:
                 spectrograms = spectrograms.unsqueeze(1)

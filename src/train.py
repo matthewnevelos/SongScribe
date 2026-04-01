@@ -69,7 +69,7 @@ def train_model(model, preprocessor, train_loader, val_loader, epochs=5, lr=1e-4
         
         # --- VALIDATION PHASE ---
         print("starting validation")
-        val_metrics = evaluate_model(model, val_loader)
+        val_metrics = evaluate_model(model, val_loader, preprocessor)
         avg_val_loss = val_metrics["Loss"]
         val_f1 = val_metrics["F1_Score"]
 

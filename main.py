@@ -1,17 +1,18 @@
 from src.preprocess import MaestroPreprocessor, load_metadata
 from src.dataset import MaestroDataset
-from src.models.unet import PianoUNet_v1
-from src.models.crnn import PianoTranscriptionCRNN_v1
+from src.models.unet import *
+from src.models.crnn import *
 from src.train import train_model
 from src.transcribe import transcribe_audio
 from src.format_converter import midi_to_sheet
+from src.evaluate import evaluate_model
 import torch
 from torch.utils.data import DataLoader
 from pathlib import Path
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-preprocessor = MaestroPreprocessor().to(device)
+preprocessor = MaestroPreprocessor(hop_length=128).to(device)
 
 maestro_path = r"D:/databases/maestro-v3.0.0"
 # maestro_path = r"Example Data/MAESTRO"
@@ -45,7 +46,7 @@ test_dataset = MaestroDataset(
 
 train_dataloader = DataLoader(
     train_dataset,
-    batch_size=32,
+    batch_size=16,
     shuffle=True,
     num_workers=4,
     drop_last=True,
@@ -53,7 +54,7 @@ train_dataloader = DataLoader(
 
 valid_dataloader = DataLoader(
     train_dataset,
-    batch_size=32,
+    batch_size=16,
     shuffle=True,
     num_workers=4,
     drop_last=True,
@@ -61,7 +62,7 @@ valid_dataloader = DataLoader(
 
 test_dataloader = DataLoader(
     train_dataset,
-    batch_size=32,
+    batch_size=16,
     shuffle=True,
     num_workers=4,
     drop_last=True,
@@ -69,25 +70,26 @@ test_dataloader = DataLoader(
      
             
 if __name__ == "__main__":
-    model = PianoUNet_v1().to(device)
+    model = PianoUNet().to(device)
     
-    # model = train_model(
-    #     model,
-    #     preprocessor, 
-    #     train_dataloader,
-    #     valid_dataloader,
-    #     epochs=1)
+    model = train_model(
+        model,
+        preprocessor, 
+        train_dataloader,
+        valid_dataloader,
+        epochs=1,
+        augment=False)
     
-    state_dict = torch.load("trained_models/PianoUNet_v1_v3.pth", map_location=device, weights_only=True)
-    model.load_state_dict(state_dict)
+    # state_dict = torch.load("trained_models/PianoUNet_v1_v4.pth", map_location=device, weights_only=True)
+    # model.load_state_dict(state_dict)
     
-    AUDIO_FILE = "test_set/sheep/Sheep.wav"
-    OUTPUT_FOLDER = "test_set/sheep"
-    sheet = transcribe_audio(AUDIO_FILE, model, OUTPUT_FOLDER)
+    # AUDIO_FILE = "test_set/sheep/Sheep.wav"
+    # OUTPUT_FOLDER = "test_set/sheep"
+    # sheet = transcribe_audio(AUDIO_FILE, model, OUTPUT_FOLDER)
     
-    AUDIO_FILE = "test_set/signal flags/Signal Flags.wav"
-    OUTPUT_FOLDER = "test_set/signal flags"
-    sheet = transcribe_audio(AUDIO_FILE, model, OUTPUT_FOLDER)
+    # AUDIO_FILE = "test_set/signal flags/Signal Flags.wav"
+    # OUTPUT_FOLDER = "test_set/signal flags"
+    # sheet = transcribe_audio(AUDIO_FILE, model, OUTPUT_FOLDER)
     
             
     # metrics = evaluate_model(model, test_dataloader, threshold=0.5)
