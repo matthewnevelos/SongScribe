@@ -4,6 +4,7 @@ from src.models import PianoTranscriptionCRNN
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.utils.prune as prune
 
 from torch.utils.data import DataLoader
 from pathlib import Path
@@ -21,6 +22,40 @@ processed_dir = Path(maestro_path).parent / f"midi_{preprocessor.target_sr}"
 metadata = load_metadata(maestro_path)
 if not processed_dir.exists():
     preprocessor.precompute_midi_labels(processed_dir, sum(metadata.values(), []))
+
+def prune_model_step(model, prune_amount=0.1):
+    """
+    Applies L1 Unstructured Pruning to all Convolutional and Linear layers.
+    Removes the lowest (prune_amount * 100)% of weights globally.
+    """
+    parameters_to_prune = []
+    for module in model.modules():
+        if isinstance(module, nn.Conv2d) or isinstance(module, nn.Linear):
+            parameters_to_prune.append((module, 'weight'))
+            
+    # We don't strictly prune the GRUs here because pruning recurrent 
+    # hidden-to-hidden matrices can cause mathematical instability, 
+    # and they will be heavily compressed by quantization anyway.
+            
+    prune.global_unstructured(
+        parameters_to_prune,
+        pruning_method=prune.L1Unstructured,
+        amount=prune_amount,
+    )
+    print(f"[*] Pruned an additional {prune_amount*100}% of Conv/Linear weights.")
+
+def make_pruning_permanent(model):
+    """
+    PyTorch pruning uses weight masks during training. 
+    This removes the masks and makes the 0.0 weights permanent for saving.
+    """
+    for module in model.modules():
+        if isinstance(module, nn.Conv2d) or isinstance(module, nn.Linear):
+            try:
+                prune.remove(module, 'weight')
+            except ValueError:
+                pass # Already permanent or wasn't pruned
+    print("[*] Pruning masks removed. Zeroed weights are now permanent.")
 
 train_dataset = MaestroDataset(maestro_dir=maestro_path, target_sr=preprocessor.target_sr, hop_length=preprocessor.hop_length, metadata=metadata["train"])
 valid_dataset = MaestroDataset(maestro_dir=maestro_path, target_sr=preprocessor.target_sr, hop_length=preprocessor.hop_length, metadata=metadata["validation"])
@@ -84,14 +119,17 @@ if __name__ == "__main__":
     epochs = 5
     
     # If the model crashes during training you can resume from the latest epoch
-    start_epoch = 3
-    checkpoint_path = f"onsets_frames_epoch_{start_epoch}.pth"
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device, weights_only=True))
+    #start_epoch = 3
+    #checkpoint_path = f"onsets_frames_epoch_{start_epoch}.pth"
+    #model.load_state_dict(torch.load(checkpoint_path, map_location=device, weights_only=True))
     
+    prune_amount_per_epoch = 0.1 # Prune 10%
+
     print("Starting Training for Onsets and Frames CRNN...")
     
     # 2. Training Loop
-    for epoch in range(start_epoch, epochs):
+    for epoch in range(epochs):
+        # Change to range(start_epoch, epochs) if using checkpoint
         model.train()
         total_loss = 0.0
         total_onset_loss = 0.0
@@ -152,9 +190,34 @@ if __name__ == "__main__":
         avg_loss = total_loss / len(train_dataloader)
         avg_onset = total_onset_loss / len(train_dataloader)
         avg_frame = total_frame_loss / len(train_dataloader)
+
+        if epoch < epochs - 1:
+            prune_model_step(model, prune_amount=prune_amount_per_epoch)
         
         print(f"--- Epoch {epoch+1} Completed ---")
         print(f"Average Total Loss: {avg_loss:.4f} | Onset: {avg_onset:.4f} | Frame: {avg_frame:.4f}")
         
         # Save checkpoint
         torch.save(model.state_dict(), f"onsets_frames_epoch_{epoch+1}.pth")
+
+    print("\nStarting Post-Training Compression...")
+    
+    # 1. Make Pruning Permanent
+    make_pruning_permanent(model)
+    
+    # Move model to CPU for Dynamic Quantization (PyTorch requirement)
+    model.eval()
+    model.to('cpu')
+    
+    # 2. Dynamic Quantization
+    # We target the GRU and Linear layers, converting their weights to int8.
+    print("[*] Quantizing GRU and Linear layers to INT8...")
+    quantized_model = torch.quantization.quantize_dynamic(
+        model, 
+        {nn.GRU, nn.Linear}, 
+        dtype=torch.qint8
+    )
+    
+    # 3. Save the final compressed model
+    compressed_path = "onsets_frames_COMPRESSED_final.pth"
+    torch.save(quantized_model.state_dict(), compressed_path)

@@ -11,11 +11,13 @@ import music21
 from scipy.signal import medfilt
 from pathlib import Path
 import librosa
+import matplotlib.pyplot as plt
+import glob
+import matplotlib.image as mpimg
 
 from models import PianoTranscriptionCRNN
 from preprocess import MaestroPreprocessor
 
-### ADDED
 def estimate_tempo(audio_path):
     y, sr = librosa.load(audio_path)
     # onset_env tracks the 'beats' or energy spikes in the audio
@@ -27,17 +29,20 @@ def estimate_tempo(audio_path):
 def tensor_to_midi(onset_probs, frame_probs, frames_per_second, output_filepath):
     # Thresholds
     onset_threshold = 0.5
-    frame_threshold = 0.3 # Frame threshold can be lower to catch the fading tail
+    frame_threshold = 0.3 
     
-    # Convert to binary
+    # Create boolean arrays
     onsets = (onset_probs > onset_threshold)
     frames = (frame_probs > frame_threshold)
     
     pm = pretty_midi.PrettyMIDI()
-    piano = pretty_midi.Instrument(program=0)
+    
+    # Create TWO separate tracks for Right Hand (Treble) and Left Hand (Bass)
+    right_hand = pretty_midi.Instrument(program=0, name="Treble")
+    left_hand = pretty_midi.Instrument(program=0, name="Bass")
     
     for pitch_idx in range(88):
-        midi_pitch = pitch_idx + 21
+        midi_pitch = pitch_idx + 21 # A0 is MIDI note 21
         
         is_playing = False
         start_time = 0.0
@@ -50,26 +55,48 @@ def tensor_to_midi(onset_probs, frame_probs, frames_per_second, output_filepath)
                 
             # State 2: A note was struck AGAIN while the previous one was still sustaining
             elif onsets[pitch_idx, t] and is_playing:
-                # End the previous note right here
                 end_time = t / frames_per_second
-                piano.notes.append(pretty_midi.Note(80, midi_pitch, start_time, end_time))
-                # Immediately start the new note
-                start_time = end_time 
+                note = pretty_midi.Note(velocity=80, pitch=midi_pitch, start=start_time, end=end_time)
+                
+                # Split hands at Middle C (Pitch 60)
+                if midi_pitch >= 60:
+                    right_hand.notes.append(note)
+                else:
+                    left_hand.notes.append(note)
+                    
+                start_time = end_time # Immediately start the new note
                 
             # State 3: The sustain dies out
             elif not frames[pitch_idx, t] and is_playing:
                 end_time = t / frames_per_second
-                # Ensure the note has a minimum length so music21 doesn't crash
+                
+                # Ensure minimum length (50ms) to prevent music21 validation crashes
                 if end_time - start_time > 0.05: 
-                    piano.notes.append(pretty_midi.Note(80, midi_pitch, start_time, end_time))
+                    note = pretty_midi.Note(velocity=80, pitch=midi_pitch, start=start_time, end=end_time)
+                    if midi_pitch >= 60:
+                        right_hand.notes.append(note)
+                    else:
+                        left_hand.notes.append(note)
+                        
                 is_playing = False
                 
-        # Catch any notes still playing at the very end of the song
+        # State 4: Catch any notes still playing at the very end of the audio file
         if is_playing:
             end_time = onsets.shape[1] / frames_per_second
-            piano.notes.append(pretty_midi.Note(80, midi_pitch, start_time, end_time))
+            if end_time - start_time > 0.05:
+                note = pretty_midi.Note(velocity=80, pitch=midi_pitch, start=start_time, end=end_time)
+                if midi_pitch >= 60:
+                    right_hand.notes.append(note)
+                else:
+                    left_hand.notes.append(note)
 
-    pm.instruments.append(piano)
+    # Only add the staves to the MIDI file if they actually played notes
+    # (Prevents fatal empty <part> tags in MusicXML)
+    if len(right_hand.notes) > 0:
+        pm.instruments.append(right_hand)
+    if len(left_hand.notes) > 0:
+        pm.instruments.append(left_hand)
+        
     pm.write(str(output_filepath))
 
 def transcribe_audio(audio_path, model_path, output_dir, chunk_seconds=5.0):
@@ -160,6 +187,19 @@ def transcribe_audio(audio_path, model_path, output_dir, chunk_seconds=5.0):
     # --- NEW: Save Spectrogram Image ---
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
+
+    spec_path = output_dir / f"{Path(audio_path).stem}_spectrogram.png"
+    plt.figure(figsize=(16, 6))
+    # Using 'magma' colormap as it clearly highlights high-energy frequencies
+    plt.imshow(full_spectrogram.numpy(), aspect='auto', origin='lower', cmap='magma')
+    plt.title(f"CQT Spectrogram: {Path(audio_path).name}")
+    plt.ylabel("MIDI Pitch (Index 0 = A0)")
+    plt.xlabel("Time (Frames)")
+    plt.colorbar(label="Magnitude")
+    plt.tight_layout()
+    plt.savefig(spec_path, dpi=150)
+    plt.close()
+    print(f"Saved Spectrogram to: {spec_path}")
     
     # 4. Convert to MIDI
     midi_path = output_dir / f"{Path(audio_path).stem}_transcribed.mid"
@@ -171,22 +211,94 @@ def transcribe_audio(audio_path, model_path, output_dir, chunk_seconds=5.0):
     print("Converting to Sheet Music...")
     try:
         score = music21.converter.parse(midi_path)
-        mm = music21.tempo.MetronomeMark(number=estimated_bpm)
-        score.insert(0, mm)
+        
+        mm = music21.tempo.MetronomeMark(number=tempo)
         ts = music21.meter.TimeSignature('4/4')
-        score.insert(0, ts)
         
-        score.quantize([4, 8, 16], inPlace=True)
+        # FIX: Inject metadata into the individual Parts (Staves), not the master Score
+        if score.parts:
+            for part in score.parts:
+                part.insert(0, mm)
+                part.insert(0, ts)
+        else:
+            # Fallback if no parts exist (e.g., a single flat stream)
+            score.insert(0, mm)
+            score.insert(0, ts)
         
-        xml_path = output_dir / f"{Path(audio_path).stem}_sheet.xml"
+        # Quantize (Note: [1,2,4,8,16] allows down to 64th notes)
+        score.quantize([1, 2, 4, 8, 16], inPlace=True)
+        
+        # FIX: Use the .musicxml extension for better software compatibility
+        xml_path = output_dir / f"{Path(audio_path).stem}_transcribed.musicxml"
         score.write('musicxml', fp=str(xml_path))
         print(f"Saved Sheet Music XML to: {xml_path}")
-        score.show() 
+        
+        view_sheet_music_inline(xml_path, output_dir)
+        
     except Exception as e:
         print(f"Failed to render sheet music: {e}")
 
+def view_sheet_music_inline(xml_path, output_dir):
+    """Renders MusicXML to PNG in the background and displays it via Matplotlib."""
+    xml_path = Path(xml_path)
+    output_dir = Path(output_dir)
+    
+    # 1. Find the MuseScore executable
+    system = platform.system()
+    if system == "Windows":
+        paths = [
+            r"C:\Program Files\MuseScore 4\bin\MuseScore4.exe",
+            r"C:\Program Files\MuseScore 3\bin\MuseScore3.exe"
+        ]
+        mscore_exe = next((p for p in paths if Path(p).exists()), None)
+    elif system == "Darwin": 
+        mscore_exe = "/Applications/MuseScore 4.app/Contents/MacOS/mscore"
+        if not Path(mscore_exe).exists():
+            mscore_exe = "/Applications/MuseScore 3.app/Contents/MacOS/mscore"
+    else: 
+        mscore_exe = "mscore" 
+
+    if not mscore_exe or (system != "Linux" and not Path(mscore_exe).exists()):
+        print("MuseScore not found. Cannot render inline images.")
+        return
+
+    # 2. Command MuseScore to render PNGs
+    print("Rendering sheet music images...")
+    # MuseScore will automatically append "-1", "-2" for multiple pages
+    png_base_path = output_dir / xml_path.stem
+    
+    try:
+        command = [mscore_exe, "-o", f"{png_base_path}.png", str(xml_path)]
+        subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        
+        # 3. Find all the generated pages
+        # MuseScore outputs them as "filename-1.png", "filename-2.png", etc.
+        pages = sorted(glob.glob(f"{png_base_path}-*.png"))
+        
+        if not pages:
+            print("Failed to generate PNGs.")
+            return
+            
+        # 4. Display the pages natively in Python
+        for i, page_path in enumerate(pages):
+            img = mpimg.imread(page_path)
+            
+            # Create a tall figure that mimics a piece of paper
+            plt.figure(figsize=(10, 14)) 
+            plt.imshow(img)
+            plt.axis('off') # Hide the graph axes
+            plt.title(f"Sheet Music - Page {i+1}", fontsize=14)
+            plt.tight_layout()
+            
+            print(f"Displaying Page {i+1}... (Close the window to continue)")
+            plt.show() # This pauses the script until you close the image window
+            
+    except subprocess.CalledProcessError as e:
+        print(f"Background rendering failed: {e}")
+
 if __name__ == "__main__":
-    AUDIO_FILE = "test_set/sheep/Sheep.wav"
+    #AUDIO_FILE = "test_set/Sheep/Sheep.wav"
+    AUDIO_FILE = "test_set/signal flags/Signal Flags.wav"
     MODEL_WEIGHTS = "trained_models/onsets_1.pth"
     OUTPUT_FOLDER = "test_set/sheep"
     
