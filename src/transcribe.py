@@ -78,6 +78,7 @@ def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, s
     midi_path = output_dir / f"{trained_model.__class__.__name__}_transcribed.midi"
     
     midi_obj = output_to_midi(binary_numpy, sample_rate=sr, hop_length=hop_length)
+    midi_obj = snap_midi_timing(midi_obj)
     midi_obj.write(str(midi_path))
     print(f"Saved MIDI to: {midi_path}")
     
@@ -90,8 +91,40 @@ def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, s
     try:
         sheet = midi_to_sheet(midi_obj, estimated_bpm)
         sheet_path = output_dir / f"{trained_model.__class__.__name__}_sheet.xml"
-        sheet.write("musicxml", fp=str(sheet_path))
+        sheet.write("musicxml", fp=str(sheet_path)) #type: ignore
         if show:
-            sheet.show()
+            sheet.show() #type: ignore
     except Exception as e:
         print(f"Failed to render sheet music: {e}")
+
+
+def snap_midi_timing(midi_obj, tolerance_sec=0.04):
+    """
+    Forces notes that start or end almost simultaneously to align perfectly.
+    tolerance_sec=0.04 means notes within 40ms of each other are snapped together.
+    """
+    for instrument in midi_obj.instruments:
+        #Snap Start Times (Onsets)
+        notes = sorted(instrument.notes, key=lambda n: n.start)
+        if not notes:
+            continue
+            
+        current_start_group = notes[0].start
+        for note in notes:
+            if abs(note.start - current_start_group) <= tolerance_sec:
+                note.start = current_start_group # Fudge the number to match the group
+            else:
+                current_start_group = note.start # Start a new time group
+
+        # Snap End Times (Offsets) - Prevents tiny overlapping tails
+        notes = sorted(instrument.notes, key=lambda n: n.end)
+        current_end_group = notes[0].end
+        for note in notes:
+            if abs(note.end - current_end_group) <= tolerance_sec:
+                note.end = current_end_group
+            else:
+                current_end_group = note.end
+                
+        instrument.notes = sorted(notes, key=lambda n: n.start)
+        
+    return midi_obj
