@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SongScribe | End-to-End Inference</title>
+    <title>SongScribe | Interactive</title>
     
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <script src="https://cdn.jsdelivr.net/combine/npm/tone@14.7.58,npm/@magenta/music@1.23.1/es6/core.js,npm/focus-visible@5,npm/html-midi-player@1.5.0"></script>
@@ -23,7 +23,7 @@
 <body>
 
 <div class="card">
-    <h2>🎹 SongScribe E2E</h2>
+    <h2>🎹 SongScribe</h2>
     <p>Upload a piano recording to transcribe and tune.</p>
     
     <input type="file" id="audio-input" accept="audio/*" disabled>
@@ -33,12 +33,12 @@
     <div class="controls" id="tuning-controls" style="display: none; background: #e9ecef; padding: 15px; border-radius: 8px;">
         <h3 style="margin-top: 0; font-size: 16px;">Real-Time Threshold Tuning</h3>
         
-        <label for="onset-slider" style="font-weight: bold;">Strike Threshold (Onset): <span id="onset-val">0.01</span></label>
-        <input type="range" id="onset-slider" min="0.01" max="0.99" step="0.01" value="0.01">
+        <label for="onset-slider" style="font-weight: bold;">Strike Threshold (Onset): <span id="onset-val">0.5</span></label>
+        <input type="range" id="onset-slider" min="0.01" max="0.99" step="0.01" value="0.5">
         <p style="font-size: 12px; color: #666; margin-top: 2px;">Lower = More sensitive to note attacks. Higher = Ignores soft/ghost notes.</p>
 
-        <label for="frame-slider" style="font-weight: bold; margin-top: 10px; display: block;">Sustain Threshold (Frame): <span id="frame-val">0.68</span></label>
-        <input type="range" id="frame-slider" min="0.01" max="0.99" step="0.01" value="0.68">
+        <label for="frame-slider" style="font-weight: bold; margin-top: 10px; display: block;">Sustain Threshold (Frame): <span id="frame-val">0.6</span></label>
+        <input type="range" id="frame-slider" min="0.01" max="0.99" step="0.01" value="0.6">
         <p style="font-size: 12px; color: #666; margin-top: 2px;">Lower = Notes hold out longer. Higher = Notes cut off faster.</p>
     </div>
 
