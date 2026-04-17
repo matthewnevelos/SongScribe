@@ -11,7 +11,8 @@ from torch.utils.data import DataLoader
 if __name__ == "__main__":
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    preprocessor = MaestroPreprocessor(hop_length=128).to(device)
+    
+    preprocessor = MaestroPreprocessor().to(device)
 
     # defines the path of csv and raw data
     maestro_path = r"D:/databases/maestro-v3.0.0"
@@ -70,6 +71,7 @@ if __name__ == "__main__":
         drop_last=True,
     )
 
+    # Select model
     model = PianoOnsetFrameCRNN().to(device)
 
     #training loop
@@ -82,17 +84,17 @@ if __name__ == "__main__":
         augment=False)
     
     #load model if just evaluating
-    state_dict = torch.load("trained_models/onsets_frames_epoch_5.pth", map_location=device, weights_only=True)
+    state_dict = torch.load("trained_models/onset_model.pth", map_location=device, weights_only=True)
     model.load_state_dict(state_dict)
     
     #convert to onnx model for interactive GitHub Pages app
     export_onnx(model, "docs/songscribe.onnx")
     
-    #transcribe baa baa black sheep
+    # #transcribe baa baa black sheep
     AUDIO_FILE = "test_set/sheep/Sheep.wav"
     OUTPUT_FOLDER = "test_set/sheep"
-    sheet = transcribe_audio(AUDIO_FILE, model, OUTPUT_FOLDER, onset_threshold=0.3,)      
-
+    sheet = transcribe_audio(AUDIO_FILE, model, OUTPUT_FOLDER, show=True)
+    
     # transcribe signal flags
     AUDIO_FILE = "test_set/signal flags/Signal Flags.wav"
     OUTPUT_FOLDER = "test_set/signal flags"
