@@ -137,10 +137,17 @@
         const midiBlob = generateMidiBlob(cachedOnsetProbs, cachedFrameProbs, cachedTimeSteps, onsetThresh, frameThresh);
         const midiUrl = URL.createObjectURL(midiBlob);
 
+        // Inject BOTH the piano roll and the traditional staff
         document.getElementById('result-container').innerHTML = `
-            <midi-player src="${midiUrl}" sound-font visualizer="#canvas-roll"></midi-player>
+            <midi-player src="${midiUrl}" sound-font visualizer="#canvas-staff, #canvas-roll"></midi-player>
+            
+            <h4 style="margin-bottom: 5px;">Standard Notation:</h4>
+            <midi-visualizer type="staff" id="canvas-staff" src="${midiUrl}" style="background: #fff; padding: 10px; border-radius: 4px;"></midi-visualizer>
+            
+            <h4 style="margin-bottom: 5px;">Piano Roll:</h4>
             <midi-visualizer type="piano-roll" id="canvas-roll" src="${midiUrl}"></midi-visualizer>
-            <a href="${midiUrl}" download="${currentFileName}_tuned.mid" class="download-btn" style="display: block;">
+            
+            <a href="${midiUrl}" download="${currentFileName}_tuned.mid" class="download-btn" style="display: block; margin-top: 15px;">
                 ⬇️ Download Tuned MIDI
             </a>
         `;
@@ -152,10 +159,12 @@
         const sampleRate = 22050;
         const ticksPerSecond = 512; 
         const ticksPerFrame = (hopLength / sampleRate) * ticksPerSecond;
+        const snapGrid = 128; // 8th note quantization grid
 
         let events = [];
         let activeNotes = {};
 
+        // Loop 1: Main Note Extraction
         for (let t = 0; t < timeSteps; t++) {
             for (let p = 0; p < 88; p++) {
                 const index = (p * timeSteps) + t; 
@@ -165,25 +174,35 @@
                     activeNotes[p] = t; 
                 } 
                 else if (activeNotes[p] !== undefined && frameProbs[index] < frameThreshold) {
-                    const startTick = Math.round(activeNotes[p] * ticksPerFrame);
-                    const duration = Math.round((t - activeNotes[p]) * ticksPerFrame);
+                    let rawStartTick = activeNotes[p] * ticksPerFrame;
+                    let rawDuration = (t - activeNotes[p]) * ticksPerFrame;
+
+                    // Quantize Start Time
+                    const startTick = Math.round(rawStartTick / snapGrid) * snapGrid;
                     
-                    if (duration > 0) {
-                        events.push({ tick: startTick, type: 0x90, note: midiNote, vel: 80 }); 
-                        events.push({ tick: startTick + duration, type: 0x80, note: midiNote, vel: 0 }); 
-                    }
+                    // Quantize Duration (Ensure it's at least 1 grid length so fast notes aren't deleted)
+                    let duration = Math.round(rawDuration / snapGrid) * snapGrid;
+                    duration = Math.max(snapGrid, duration);
+                    
+                    events.push({ tick: startTick, type: 0x90, note: midiNote, vel: 80 }); 
+                    events.push({ tick: startTick + duration, type: 0x80, note: midiNote, vel: 0 }); 
+                    
                     delete activeNotes[p]; 
                 }
             }
         }
 
+        // Loop 2: Trailing Notes Cleanup (Must also be quantized!)
         for (const [p, startT] of Object.entries(activeNotes)) {
-            const startTick = Math.round(startT * ticksPerFrame);
-            const duration = Math.round((timeSteps - startT) * ticksPerFrame);
-            if (duration > 0) {
-                events.push({ tick: startTick, type: 0x90, note: parseInt(p) + 21, vel: 80 }); 
-                events.push({ tick: startTick + duration, type: 0x80, note: parseInt(p) + 21, vel: 0 }); 
-            }
+            let rawStartTick = startT * ticksPerFrame;
+            let rawDuration = (timeSteps - startT) * ticksPerFrame;
+
+            const startTick = Math.round(rawStartTick / snapGrid) * snapGrid;
+            let duration = Math.round(rawDuration / snapGrid) * snapGrid;
+            duration = Math.max(snapGrid, duration);
+            
+            events.push({ tick: startTick, type: 0x90, note: parseInt(p) + 21, vel: 80 }); 
+            events.push({ tick: startTick + duration, type: 0x80, note: parseInt(p) + 21, vel: 0 }); 
         }
 
         events.sort((a, b) => a.tick - b.tick);
@@ -191,6 +210,20 @@
         const header = [0x4d, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00];
         let trackData = [];
         let lastTick = 0;
+
+        
+        // --- NEW: Inject Metadata at Delta Time 0 ---
+        
+        // 1. Time Signature: 4/4 time
+        // [Delta=0, MetaEvent, TimeSig, Length=4, Num=4, Denom=2^2=4, Metronome=24, 32nds=8]
+        trackData.push(0x00, 0xFF, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08);
+
+        // 2. Set Tempo: 120 BPM (500,000 microseconds per beat)
+        // [Delta=0, MetaEvent, SetTempo, Length=3, Hex values for 500k: 0x07, 0xA1, 0x20]
+        trackData.push(0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20);
+
+        // --------------------------------------------
+
 
         events.forEach(e => {
             let delta = e.tick - lastTick;
