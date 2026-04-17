@@ -6,6 +6,7 @@ from src.train import train_model
 from src.transcribe import transcribe_audio
 from src.format_converter import midi_to_sheet, audio_to_CQT, audio_to_STFT
 from src.evaluate import eval_metrics
+from src.export_onnx import export_onnx
 import torch
 from torch.utils.data import DataLoader
 from pathlib import Path
@@ -71,35 +72,27 @@ if __name__ == "__main__":
         drop_last=True,
     )
 
-    model = OnsetCRNN().to(device)
+    model = PianoOnsetFrameCRNN().to(device)
 
-    model = train_model(
-        model,
-        preprocessor, 
-        train_dataloader,
-        valid_dataloader,
-        epochs=3,
-        augment=False)
+    # model = train_model(
+    #     model,
+    #     preprocessor, 
+    #     train_dataloader,
+    #     valid_dataloader,
+    #     epochs=3,
+    #     augment=False)
     
-    # state_dict = torch.load("trained_models/onsets_frames_epoch_4.pth", map_location=device, weights_only=True)
-    # model.load_state_dict(state_dict)
+    state_dict = torch.load("trained_models/onsets_frames_epoch_4.pth", map_location=device, weights_only=True)
+    model.load_state_dict(state_dict)
     
-    AUDIO_FILE = "test_set/sheep/Sheep.wav"
-    OUTPUT_FOLDER = "test_set/sheep"
-    # audio, _ = torchaudio.load(AUDIO_FILE)
-    # plot_CQT(preprocessor(audio, augment=False, orig_sr=preprocessor.target_sr), show=True)
-    sheet = transcribe_audio(AUDIO_FILE, model, OUTPUT_FOLDER)
-    
-    AUDIO_FILE = "test_set/signal flags/Signal Flags.wav"
-    OUTPUT_FOLDER = "test_set/signal flags"
-    sheet = transcribe_audio(AUDIO_FILE, model, OUTPUT_FOLDER, frame_threshold=0.2, onset_threshold=0.9, show=True)
-    
-            
-    # # metrics = eval_metrics(model, test_dataloader, threshold=0.5)
-    
-    # # AUDIO_FILE = "test_set/C/piano_c.ogg"
     # AUDIO_FILE = "test_set/sheep/Sheep.wav"
-    # # AUDIO_FILE = "test_set/signal flags/Signal Flags.wav"
-    # audio, sr = torchaudio.load(AUDIO_FILE)
-    # cqt = audio_to_STFT(audio)
-    # plot_CQT(cqt[0], sr, show=True)
+    # OUTPUT_FOLDER = "test_set/sheep"
+    # # audio, _ = torchaudio.load(AUDIO_FILE)
+    # # plot_CQT(preprocessor(audio, augment=False, orig_sr=preprocessor.target_sr), show=True)
+    # sheet = transcribe_audio(AUDIO_FILE, model, OUTPUT_FOLDER, onset_threshold=0.3,)      
+
+    export_onnx(model, "docs/songscribe.onnx")
+    
+    # AUDIO_FILE = "test_set/signal flags/Signal Flags.wav"
+    # OUTPUT_FOLDER = "test_set/signal flags"
+    # sheet = transcribe_audio(AUDIO_FILE, model, OUTPUT_FOLDER, show=True)
