@@ -52,21 +52,23 @@ def save_debug_samples(raw_waveform, augmented_waveform, raw_cqt, augmented_cqt,
     
     print(f"Saved audio and plots to {save_path.absolute()}")
     
-def plot_CQT(CQT, show=False, file_path = None, title=None):
+def plot_CQT(CQT, sr, hop_length=256, show=False, file_path = None, title=None):
     arr = CQT.detach().cpu().squeeze().numpy()
+    num_frames = arr.shape[1]
+    dur_sec = (num_frames * hop_length) / sr
     
     # convert to dB
     arr = 10 * np.log10(arr + 1e-4)
 
     fig, ax = plt.subplots(figsize=(10, 4))
 
-    img1 = ax.imshow(arr, aspect='auto', origin='lower', cmap='magma')
+    img1 = ax.imshow(arr, aspect='auto', origin='lower', cmap='magma', extent=[0, dur_sec, 0, arr.shape[0]]) #type: ignore
     
     # Labeling
     if title:
         ax.set_title(title)
     ax.set_ylabel("Frequency Bins")
-    ax.set_xlabel("Time Frames")
+    ax.set_xlabel("Time (s)")
     fig.colorbar(img1, ax=ax, label="Magnitude (dB)")
 
     plt.tight_layout()

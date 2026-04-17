@@ -5,17 +5,16 @@ import librosa
 from scipy.signal import medfilt
 from pathlib import Path
 from .format_converter import output_to_midi, midi_to_sheet, audio_to_CQT
-from .evaluate import hysteresis
+from .evaluate import binarize_output, eval_metrics
 
 
-def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, sr = 22050, hop_length=256):
+def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, sr = 22050, hop_length=256,
+                     frame_threshold = 0.3, onset_threshold=0.5, show=False):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     #Load Model
     trained_model = trained_model.to(device)
     trained_model.eval()
-    
-    frames_per_second = sr / hop_length
     
     # load audio
     waveform, orig_sr = torchaudio.load(audio_path)
@@ -28,7 +27,8 @@ def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, s
     
     # process chunk by chunk
     chunk_samples = int(chunk_seconds * sr)
-    all_predictions = []
+    all_onset_probs = [] # single output models will ignore this
+    all_frame_probs = []
     
     print(f"Transcribing {audio_path}...")
     with torch.no_grad():
@@ -44,16 +44,29 @@ def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, s
             spectrogram = spectrogram.unsqueeze(1)
             
             outputs = trained_model(spectrogram) 
-            probs = torch.sigmoid(outputs)
-            all_predictions.append(probs.squeeze(0))
+            
+            if isinstance(outputs, tuple):
+                onset_probs = torch.sigmoid(outputs[0]).squeeze(0)
+                frame_probs = torch.sigmoid(outputs[1]).squeeze(0)
+                all_onset_probs.append(onset_probs)
+                all_frame_probs.append(frame_probs)
+            else:
+                # Standard single-output model
+                probs = torch.sigmoid(outputs).squeeze(0)
+                all_frame_probs.append(probs)
+                
 
-    full_prediction = torch.cat(all_predictions, dim=1)
+    all_frame_probs = torch.cat(all_frame_probs, dim=1)
+    original_frames = int(waveform.shape[1] // hop_length)
+    all_frame_probs = all_frame_probs[:, :original_frames]
     
-    original_frames = int((waveform.shape[1] / sr) * frames_per_second)
-    full_prediction = full_prediction[:, :original_frames]
-    
-    binary_tensor = hysteresis(full_prediction.unsqueeze(0)).squeeze(0)
-    
+    # Reconstruct onsets and combine (ONLY if dual output)
+    final_onset_tensor = None
+    if len(all_onset_probs) > 0:
+        final_onset_tensor = torch.cat(all_onset_probs, dim=1)[:, :original_frames]
+        
+    binary_tensor = binarize_output(all_frame_probs, final_onset_tensor, frame_threshold=frame_threshold, onset_threshold=onset_threshold)
+
     # Smoothing and Post-Processing
     binary_numpy = binary_tensor.cpu().numpy()
     for i in range(binary_numpy.shape[0]):
@@ -64,12 +77,7 @@ def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, s
     output_dir.mkdir(exist_ok=True, parents=True)
     midi_path = output_dir / f"{trained_model.__class__.__name__}_transcribed.midi"
     
-    midi_obj = output_to_midi(
-        raw_output=binary_numpy, 
-        threshold=0.5, 
-        sample_rate=sr, 
-        hop_length=hop_length
-    )
+    midi_obj = output_to_midi(binary_numpy, sample_rate=sr, hop_length=hop_length)
     midi_obj.write(str(midi_path))
     print(f"Saved MIDI to: {midi_path}")
     
@@ -83,5 +91,7 @@ def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, s
         sheet = midi_to_sheet(midi_obj, estimated_bpm)
         sheet_path = output_dir / f"{trained_model.__class__.__name__}_sheet.xml"
         sheet.write("musicxml", fp=str(sheet_path))
+        if show:
+            sheet.show()
     except Exception as e:
         print(f"Failed to render sheet music: {e}")

@@ -5,6 +5,7 @@ import pretty_midi
 import music21
 import io
 import functools
+import torchaudio
 
 
 @functools.lru_cache(maxsize=1)
@@ -29,6 +30,27 @@ def audio_to_CQT(audio, sample_rate=22050, hop_length=256, f_min=27.5, n_bins=88
     )
     return preprocessor(audio, sample_rate)
 
+@functools.lru_cache(maxsize=1)
+def get_stft_preprocessor(device='cpu', n_fft=1024, hop_length=256, win_length=None):
+    preprocessor = torchaudio.transforms.Spectrogram(
+        n_fft=n_fft,
+        hop_length=hop_length,
+        win_length=win_length,
+        power=2.0
+    )
+    return preprocessor.to(device)
+
+def audio_to_STFT(audio, n_fft=1024, hop_length=256, win_length=None):
+    current_device = str(audio.device) if hasattr(audio, 'device') else 'cpu'
+    preprocessor = get_stft_preprocessor(
+        device=current_device,
+        n_fft=n_fft,
+        hop_length=hop_length,
+        win_length=win_length
+    )
+    # torchaudio transforms do not require the sample rate passed in the forward pass
+    return preprocessor(audio)
+
 
 def cqt_to_audio(cqt, sample_rate=22050, hop_length=256, f_min=27.5, bins_per_octave=12):
     #shape is (Batch, Bins, Time)
@@ -47,14 +69,12 @@ def cqt_to_audio(cqt, sample_rate=22050, hop_length=256, f_min=27.5, bins_per_oc
 
 
 
-def output_to_midi(raw_output, threshold=0.5, sample_rate = 22050, hop_length = 256):
+def output_to_midi(binary_matrix, sample_rate = 22050, hop_length = 256):
     frames_per_second = sample_rate / hop_length
     midi = pretty_midi.PrettyMIDI()
     right_hand = pretty_midi.Instrument(program=0, name="Treble")
     left_hand = pretty_midi.Instrument(program=0, name="Bass")
-    
-    binary_matrix = (raw_output > threshold).astype(int)
-    
+        
     for pitch_idx in range(88):
         midi_pitch = pitch_idx + 21 
         

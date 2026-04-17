@@ -9,6 +9,7 @@ import pretty_midi
 import numpy as np
 from tqdm import tqdm
 import librosa
+import shutil
 
 
 @dataclass
@@ -391,31 +392,85 @@ class MaestroPreprocessor(torch.nn.Module):
         return augmented
 
     
-    def precompute_midi_labels(self, output_dir, metadata):                
-        for row in tqdm(metadata, desc="Converting MIDIs to Tensors"):
-            # Recreate the MAESTRO folder structure in the output directory
-            rel_path = Path(row.midi_filename)
-            save_path = output_dir / rel_path.with_suffix('.midi.tensor')
-            save_path.parent.mkdir(parents=True, exist_ok=True)
+
+
+    def precompute_full_dataset(self, input_dir, delete_before_compute=False):
+        """
+        Precomputes and saves both the resampled audio and the MIDI label tensors.
+        output_dir: The root folder where all processed files will be saved.
+        """
+        output_dir = Path(input_dir).parent / f"maestro_{self.target_sr}"
+        metadata = load_metadata(input_dir)
+        
+        if delete_before_compute and output_dir.exists():
+            shutil.rmtree(output_dir)
             
-            if save_path.exists():
-                continue
-                
-            try:
-                pm = pretty_midi.PrettyMIDI(str(row.midi_path))
-                piano_roll = pm.get_piano_roll(fs=self.frames_per_second) #type: ignore
-                
-                # piano roll defaults to 128 notes
-                piano_roll_88 = piano_roll[21:109, :] # slice 88 pianos keys (A0=MIDI note 21, C8 = 108)
-                
-                # binarize any value greater than 0
-                binary_roll = (piano_roll_88 > 0).astype(np.float32)
-                
-                label_tensor = torch.from_numpy(binary_roll)
-                torch.save(label_tensor, save_path)
-                
-            except Exception as e:
-                print(f"Failed to process {row.midi_filename}: {e}")
+        all_metadata = []
+        for split_list in metadata.values():
+            all_metadata.extend(split_list)
+
+        
+        for row in tqdm(all_metadata, desc="Precomputing Audio and Labels"):
+            rel_midi_path = Path(row.midi_filename)
+            rel_audio_path = Path(row.audio_filename) 
+            
+            frame_save_path = output_dir / rel_midi_path.with_suffix('.midi.tensor')
+            audio_save_path = output_dir / rel_audio_path.with_suffix('.wav')
+            
+            # Create directories
+            audio_save_path.parent.mkdir(parents=True, exist_ok=True)
+            frame_save_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # audio processing
+            if not audio_save_path.exists():
+                try:
+                    waveform, orig_sr = torchaudio.load(row.audio_path)
+                    
+                    # Stereo to Mono
+                    if waveform.shape[0] > 1:
+                        waveform = torch.mean(waveform, dim=0, keepdim=True)
+                        
+                    # Resample
+                    if orig_sr != self.target_sr:
+                        waveform = torchaudio.functional.resample(waveform, orig_sr, self.target_sr)
+                        
+                    # Save the processed audio
+                    torchaudio.save(audio_save_path, waveform, self.target_sr)
+                except Exception as e:
+                    print(f"Failed to process audio for {row.audio_filename}: {e}")
+
+            # midi processing
+            if not frame_save_path.exists():
+                try:
+                    pm = pretty_midi.PrettyMIDI(str(row.midi_path))
+                    
+                    # Compute Frames
+                    piano_roll = pm.get_piano_roll(fs=self.frames_per_second) #type: ignore
+                    piano_roll_88 = piano_roll[21:109, :] 
+                    
+                    # save as one tensor instead of 2. 1 for onset, 2 for sustained, 0 for off.
+                    combined_labels = np.zeros_like(piano_roll_88, dtype=np.int8)
+                    combined_labels[piano_roll_88 > 0] = 2
+                    
+                    for instrument in pm.instruments:
+                        if instrument.is_drum: continue #will not have time to implement this
+                        for note in instrument.notes:
+                            if 21 <= note.pitch <= 108:
+                                pitch_idx = note.pitch - 21
+                                onset_frame = int(note.start * self.frames_per_second)
+                                
+                                if onset_frame < combined_labels.shape[1]:
+                                    combined_labels[pitch_idx, onset_frame] = 1
+
+                                    
+                    # Save Both Tensors
+                    torch.save(torch.from_numpy(combined_labels).to(torch.int8), frame_save_path)
+                    
+                except Exception as e:
+                    print(f"Failed to process MIDI for {row.midi_filename}: {e}")
+                    
+        return output_dir
+            
                 
 def get_bpm(waveform, sample_rate):
     # waveform must be numpy array

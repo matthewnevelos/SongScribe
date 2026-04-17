@@ -1,32 +1,44 @@
 import torch
 import torch.nn as nn
-# from .format_converter import audio_to_CQT
 from tqdm import tqdm
 
-def hysteresis(probabilities, onset = 0.9, frame=0.2):
-
-    # Create an empty tensor for the final binary predictions
-    predictions = torch.zeros_like(probabilities)
+def decode_onsets_and_frames(onset_probs, frame_probs, onset_threshold=0.5, frame_threshold=0.3):
+    """
+    Decodes dual-stream probabilities into a binary piano roll.
+    Expects 2D tensors of shape [Pitch, Time].
+    """
+    predictions = torch.zeros_like(frame_probs)
     
     # Iterate through the time dimension
-    for t in range(probabilities.shape[-1]):
+    for t in range(frame_probs.shape[1]):
+        # A note is triggered ONLY by the onset head
+        new_note = onset_probs[:, t] > onset_threshold
+        
         if t == 0:
-            # First frame just uses the onset threshold
-            predictions[:, :, t] = (probabilities[:, :, t] > onset).float()
+            predictions[:, t] = new_note.float()
         else:
-            # A note is ON if:
-            # 1. It crosses the onset threshold right now (new note)
-            # OR
-            # 2. It was ON in the previous frame AND it is currently above the frame threshold (sustaining)
+            # A note sustains if it was ON in the previous frame AND the frame head is still confident
+            sustaining_note = (predictions[:, t-1] == 1) & (frame_probs[:, t] > frame_threshold)
             
-            new_note = probabilities[:, :, t] > onset
-            sustaining_note = (predictions[:, :, t-1] == 1) & (probabilities[:, :, t] > frame)
+            predictions[:, t] = (new_note | sustaining_note).float()
             
-            predictions[:, :, t] = (new_note | sustaining_note).float()
     return predictions
 
+def binarize_output(frame_probs, onset_probs=None, onset_threshold=0.5, frame_threshold=0.3, activation_function = torch.sigmoid):
+    if onset_probs is not None:
+        # Dual-output decoding
+        return decode_onsets_and_frames(
+            onset_probs=onset_probs, 
+            frame_probs=frame_probs, 
+            onset_threshold=onset_threshold, 
+            frame_threshold=frame_threshold
+        )
+    else:
+        # Simple thresholding for single-output
+        return (frame_probs > frame_threshold).float()
 
-def evaluate_model(model, test_loader, preprocessor, threshold=0.5):
+
+def eval_metrics(model, test_loader, preprocessor):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     print(f"\n--- Starting Evaluation on {device} ---")
@@ -48,46 +60,65 @@ def evaluate_model(model, test_loader, preprocessor, threshold=0.5):
 
     #Evaluation Loop
     with torch.no_grad(): 
-        for waveforms, labels in val_bar:
-            waveforms = waveforms.to(device)
-            labels = labels.to(device)
+        for batch in val_bar:
+            waveforms = batch[0].to(device)
+            targets = [t.to(device) for t in batch[1:]]
             
+            if waveforms.dim() == 3 and waveforms.shape[1] > 1:
+                waveforms = torch.mean(waveforms, dim=1, keepdim=True)
+                
             if waveforms.dim() == 3:
-                if waveforms.shape[0] == 1 and waveforms.shape[1] > 1:
-                    waveforms = waveforms.squeeze(0)
-                    print("Is this ever used1")
-                else:
-                    waveforms = waveforms.squeeze(1)
+                waveforms = waveforms.squeeze(1)
                     
             spectrograms = preprocessor(waveforms, orig_sr=preprocessor.target_sr, augment=False)
             
             if spectrograms.dim() == 3:
                 spectrograms = spectrograms.unsqueeze(1)
                 
-            if spectrograms.shape[-1] != labels.shape[-1]:
-                raise ValueError("not same size")
+            min_time = spectrograms.shape[-1]
+            for i in range(len(targets)):
+                if targets[i].dim() == 2:
+                    targets[i] = targets[i].unsqueeze(1)
+                min_time = min(min_time, targets[i].shape[-1])
+            
+            spectrograms = spectrograms[..., :min_time]
+            targets = [t[..., :min_time] for t in targets]
             
             outputs = model(spectrograms)
-            loss = criterion(outputs, labels)
+            
+            if isinstance(outputs, tuple):
+                onset_logits, frame_logits = outputs
+                frame_labels, onset_labels = targets[0], targets[1]
+                
+                onset_loss = criterion(onset_logits, onset_labels)
+                frame_loss = criterion(frame_logits, frame_labels)
+                loss = onset_loss + frame_loss
+                
+                eval_labels = frame_labels
+                
+            else:
+                eval_labels = targets[0]
+                loss = criterion(outputs, eval_labels)
+                
             total_loss += loss.item()
-            
-            probs = torch.sigmoid(outputs)
-            # preds = (probs > threshold).float()
-            preds = hysteresis(probs)
-            
-            total_tp += (preds * labels).sum()
-            total_fp += (preds * (1 - labels)).sum()
-            total_fn += ((1 - preds) * labels).sum()
-            total_tn += ((1 - preds) * (1 - labels)).sum()
-            
-            val_bar.set_postfix({"Loss": f"{loss.item():.4f}"})
 
+            prediction_logits = frame_logits if isinstance(outputs, tuple) else outputs #type: ignore
+            preds = (torch.sigmoid(prediction_logits) > 0.5).float()
+
+            preds_flat = preds.reshape(-1)
+            labels_flat = eval_labels.reshape(-1)
+            
+
+            total_tp += (preds_flat * labels_flat).sum()
+            total_fp += (preds_flat * (1 - labels_flat)).sum()
+            total_fn += ((1 - preds_flat) * labels_flat).sum()
+            total_tn += ((1 - preds_flat) * (1 - labels_flat)).sum()
+            
     total_tp = total_tp.item()
     total_fp = total_fp.item()
     total_fn = total_fn.item()
     total_tn = total_tn.item()
-
-    # metric calculations
+    
     eps = 1e-7 
     
     avg_loss = total_loss / max(1, len(test_loader))
@@ -109,4 +140,4 @@ def evaluate_model(model, test_loader, preprocessor, threshold=0.5):
         suffix = "" if key == "Loss" else "%"
         print(f"{key:>10}: {value}{suffix}")
         
-    return metrics
+    return metrics  
