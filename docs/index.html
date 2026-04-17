@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SongScribe | End-to-End Inference</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/combine/npm/tone@14.7.58,npm/@magenta/music@1.23.1/es6/core.js,npm/focus-visible@5,npm/html-midi-player@1.5.0"></script>
+
+    <style>
+        body { font-family: -apple-system, sans-serif; padding: 20px; background: #f4f4f9; max-width: 600px; margin: auto; }
+        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        h2 { margin-top: 0; color: #333; }
+        input[type="file"] { width: 100%; padding: 10px; margin: 15px 0; border: 1px solid #ccc; border-radius: 6px; }
+        #log { background: #1e1e1e; color: #4af626; padding: 15px; border-radius: 6px; font-family: monospace; height: 200px; overflow-y: auto; font-size: 13px; white-space: pre-wrap; }
+        .controls { margin-top: 20px; display: flex; flex-direction: column; gap: 15px; }
+        .download-btn { background: #007aff; color: white; text-align: center; padding: 12px; border-radius: 6px; text-decoration: none; font-weight: bold; display: none; }
+        .download-btn:hover { background: #005bb5; }
+        midi-player { width: 100%; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>🎹 SongScribe E2E</h2>
+    <p>Upload a piano recording to transcribe and tune.</p>
+    
+    <input type="file" id="audio-input" accept="audio/*" disabled>
+    
+    <div id="log">Loading ONNX WebGPU runtime...</div>
+
+    <div class="controls" id="tuning-controls" style="display: none; background: #e9ecef; padding: 15px; border-radius: 8px;">
+        <h3 style="margin-top: 0; font-size: 16px;">Real-Time Threshold Tuning</h3>
+        
+        <label for="onset-slider" style="font-weight: bold;">Strike Threshold (Onset): <span id="onset-val">0.01</span></label>
+        <input type="range" id="onset-slider" min="0.01" max="0.99" step="0.01" value="0.01">
+        <p style="font-size: 12px; color: #666; margin-top: 2px;">Lower = More sensitive to note attacks. Higher = Ignores soft/ghost notes.</p>
+
+        <label for="frame-slider" style="font-weight: bold; margin-top: 10px; display: block;">Sustain Threshold (Frame): <span id="frame-val">0.68</span></label>
+        <input type="range" id="frame-slider" min="0.01" max="0.99" step="0.01" value="0.68">
+        <p style="font-size: 12px; color: #666; margin-top: 2px;">Lower = Notes hold out longer. Higher = Notes cut off faster.</p>
+    </div>
+
+    <div class="controls" id="result-container"></div>
+</div>
+
+<script type="module">
+    function log(message) {
+        const logDiv = document.getElementById('log');
+        logDiv.innerHTML += `\n> ${message}`;
+        logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    let session;
+    let cachedOnsetProbs = null;
+    let cachedFrameProbs = null;
+    let cachedTimeSteps = 0;
+    let currentFileName = "AI_Transcription";
+
+    // --- 1. Load the E2E Model ---
+    async function initModel() {
+        try {
+            session = await ort.InferenceSession.create('./songscribe.onnx', {
+                executionProviders: ['webgpu', 'wasm']
+            });
+            log("✅ Model loaded successfully!");
+            document.getElementById('audio-input').disabled = false; 
+        } catch (e) {
+            log(`❌ Error loading model: ${e.message}`);
+        }
+    }
+
+    // --- 2. Run Inference ---
+    document.getElementById('audio-input').addEventListener('change', async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        log(`\n--- Processing: ${file.name} ---`);
+        document.getElementById('result-container').innerHTML = ''; 
+
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 22050 });
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            
+            const rawAudio = audioBuffer.getChannelData(0);
+            
+            let maxVal = 0;
+            for (let i = 0; i < rawAudio.length; i++) if (Math.abs(rawAudio[i]) > maxVal) maxVal = Math.abs(rawAudio[i]);
+            if (maxVal > 0) for (let i = 0; i < rawAudio.length; i++) rawAudio[i] /= maxVal;
+
+            log(`Audio normalized: ${(rawAudio.length / 22050).toFixed(2)}s`);
+
+            const inputTensor = new ort.Tensor('float32', rawAudio, [1, rawAudio.length]);
+            
+            log("Running Neural Network (CQT + CRNN)...");
+            const start = performance.now(); 
+            const results = await session.run({ 'raw_audio': inputTensor }); 
+            const end = performance.now(); 
+            
+            log(`✅ Inference complete in ${((end - start)/1000).toFixed(2)}s - ${((rawAudio.length / 22050)/(end - start)*1000).toFixed(2)}x faster than real time`);
+
+            cachedOnsetProbs = results['onset_probs'].data;
+            cachedFrameProbs = results['frame_probs'].data;
+            cachedTimeSteps = cachedOnsetProbs.length / 88;
+            currentFileName = file.name.split('.')[0];
+
+            document.getElementById('tuning-controls').style.display = 'block';
+
+            updateMidiVisuals();
+            
+            log("🎉 Ready! Adjust the sliders to tune the transcription in real-time.");
+
+        } catch (e) {
+            log(`❌ Error: ${e.message}`);
+            console.error(e);
+        }
+    });
+
+    // --- Real-Time Tuning Listeners ---
+    document.getElementById('onset-slider').addEventListener('input', (e) => {
+        document.getElementById('onset-val').innerText = e.target.value;
+        if (cachedOnsetProbs) updateMidiVisuals();
+    });
+
+    document.getElementById('frame-slider').addEventListener('input', (e) => {
+        document.getElementById('frame-val').innerText = e.target.value;
+        if (cachedFrameProbs) updateMidiVisuals();
+    });
+
+    // --- Dynamic MIDI Generation ---
+    function updateMidiVisuals() {
+        const onsetThresh = parseFloat(document.getElementById('onset-slider').value);
+        const frameThresh = parseFloat(document.getElementById('frame-slider').value);
+        
+        const midiBlob = generateMidiBlob(cachedOnsetProbs, cachedFrameProbs, cachedTimeSteps, onsetThresh, frameThresh);
+        const midiUrl = URL.createObjectURL(midiBlob);
+
+        document.getElementById('result-container').innerHTML = `
+            <midi-player src="${midiUrl}" sound-font visualizer="#canvas-roll"></midi-player>
+            <midi-visualizer type="piano-roll" id="canvas-roll" src="${midiUrl}"></midi-visualizer>
+            <a href="${midiUrl}" download="${currentFileName}_tuned.mid" class="download-btn" style="display: block;">
+                ⬇️ Download Tuned MIDI
+            </a>
+        `;
+    }
+
+    // --- 3. Onset/Frame MIDI Builder ---
+    function generateMidiBlob(onsetProbs, frameProbs, timeSteps, onsetThreshold, frameThreshold) {
+        const hopLength = 128;
+        const sampleRate = 22050;
+        const ticksPerSecond = 512; 
+        const ticksPerFrame = (hopLength / sampleRate) * ticksPerSecond;
+
+        let events = [];
+        let activeNotes = {};
+
+        for (let t = 0; t < timeSteps; t++) {
+            for (let p = 0; p < 88; p++) {
+                const index = (p * timeSteps) + t; 
+                const midiNote = p + 21; 
+                
+                if (onsetProbs[index] > onsetThreshold && activeNotes[p] === undefined) {
+                    activeNotes[p] = t; 
+                } 
+                else if (activeNotes[p] !== undefined && frameProbs[index] < frameThreshold) {
+                    const startTick = Math.round(activeNotes[p] * ticksPerFrame);
+                    const duration = Math.round((t - activeNotes[p]) * ticksPerFrame);
+                    
+                    if (duration > 0) {
+                        events.push({ tick: startTick, type: 0x90, note: midiNote, vel: 80 }); 
+                        events.push({ tick: startTick + duration, type: 0x80, note: midiNote, vel: 0 }); 
+                    }
+                    delete activeNotes[p]; 
+                }
+            }
+        }
+
+        for (const [p, startT] of Object.entries(activeNotes)) {
+            const startTick = Math.round(startT * ticksPerFrame);
+            const duration = Math.round((timeSteps - startT) * ticksPerFrame);
+            if (duration > 0) {
+                events.push({ tick: startTick, type: 0x90, note: parseInt(p) + 21, vel: 80 }); 
+                events.push({ tick: startTick + duration, type: 0x80, note: parseInt(p) + 21, vel: 0 }); 
+            }
+        }
+
+        events.sort((a, b) => a.tick - b.tick);
+
+        const header = [0x4d, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00];
+        let trackData = [];
+        let lastTick = 0;
+
+        events.forEach(e => {
+            let delta = e.tick - lastTick;
+            lastTick = e.tick;
+            let vBytes = [delta & 0x7F];
+            while (delta >>= 7) vBytes.push((delta & 0x7F) | 0x80);
+            trackData.push(...vBytes.reverse(), e.type, e.note, e.vel);
+        });
+
+        trackData.push(0x00, 0xFF, 0x2F, 0x00);
+        const len = trackData.length;
+        const trackHeader = [0x4d, 0x54, 0x72, 0x6b, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff];
+
+        return new Blob([new Uint8Array([...header, ...trackHeader, ...trackData])], { type: 'audio/midi' });
+    }
+
+    initModel();
+</script>
+
+</body>
+</html>
