@@ -3,6 +3,7 @@
 Transcribe piano song into MIDI and use music21 to convert it to sheet music for musicians to learn unknown pieces. 
 
 **Visit the [Interactive Model](https://matthewnevelos.github.io/SongScribe/)**
+It is highly recommended to use [small audio files](test_set/sheep/Sheep.wav) as the post to a web app is not as powerful.
 
 ## How to Create Environment
 
