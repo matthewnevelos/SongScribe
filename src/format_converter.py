@@ -10,7 +10,7 @@ import torchaudio
 
 @functools.lru_cache(maxsize=1)
 def get_cqt_preprocessor(device='cpu', sample_rate=22050, hop_length=256, f_min=27.5, n_bins=88):
-    # cache preprocessor so I dont rebuild ever time audio_to_CQT is called
+    """Memoize the most recent CQT preprocessor """
     preprocessor = CQTPreprocessor(
         target_sr=sample_rate, 
         hop_length=hop_length, 
@@ -20,6 +20,7 @@ def get_cqt_preprocessor(device='cpu', sample_rate=22050, hop_length=256, f_min=
     return preprocessor.to(device)
 
 def audio_to_CQT(audio, sample_rate=22050, hop_length=256, f_min=27.5, n_bins=88):
+    """Convert waveform to Constant Quality Transform"""
     current_device = str(audio.device) if hasattr(audio, 'device') else 'cpu'
     preprocessor = get_cqt_preprocessor(
         device=current_device,
@@ -32,6 +33,7 @@ def audio_to_CQT(audio, sample_rate=22050, hop_length=256, f_min=27.5, n_bins=88
 
 @functools.lru_cache(maxsize=1)
 def get_stft_preprocessor(device='cpu', n_fft=1024, hop_length=256, win_length=None):
+    """Memoize the most recent STFT preprocessor """
     preprocessor = torchaudio.transforms.Spectrogram(
         n_fft=n_fft,
         hop_length=hop_length,
@@ -41,6 +43,7 @@ def get_stft_preprocessor(device='cpu', n_fft=1024, hop_length=256, win_length=N
     return preprocessor.to(device)
 
 def audio_to_STFT(audio, n_fft=1024, hop_length=256, win_length=None):
+    "Convert waveform to short term fourier transform"
     current_device = str(audio.device) if hasattr(audio, 'device') else 'cpu'
     preprocessor = get_stft_preprocessor(
         device=current_device,
@@ -53,6 +56,8 @@ def audio_to_STFT(audio, n_fft=1024, hop_length=256, win_length=None):
 
 
 def cqt_to_audio(cqt, sample_rate=22050, hop_length=256, f_min=27.5, bins_per_octave=12):
+    """Convert CQT to audio.
+    Since we arent keeping the phase of the signal this is incredible lossy"""
     #shape is (Batch, Bins, Time)
     cqt_numpy = cqt.squeeze(0).cpu().detach().numpy()
 
@@ -70,6 +75,7 @@ def cqt_to_audio(cqt, sample_rate=22050, hop_length=256, f_min=27.5, bins_per_oc
 
 
 def output_to_midi(binary_matrix, sample_rate = 22050, hop_length = 256):
+    """Convert the binarized tensor to midi"""
     frames_per_second = sample_rate / hop_length
     midi = pretty_midi.PrettyMIDI()
     right_hand = pretty_midi.Instrument(program=0, name="Treble")
@@ -109,6 +115,7 @@ def output_to_midi(binary_matrix, sample_rate = 22050, hop_length = 256):
 
 
 def midi_to_sheet(midi, bpm):
+    """Render sheet music from midi object"""
     buffer = io.BytesIO()
     midi.write(buffer) # write to buffer instead of saving file
     buffer.seek(0)

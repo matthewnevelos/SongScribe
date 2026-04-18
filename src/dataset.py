@@ -5,6 +5,7 @@ from pathlib import Path
 
 class MaestroDataset(Dataset):
     def __init__(self, maestro_dir, target_sr, hop_length, metadata, segment_seconds=5.0, return_onsets=False):
+        """Dataset class for MAESTRO dataset"""
         self.segment_seconds = segment_seconds
         self.sample_rate = target_sr
         self.hop_length = hop_length

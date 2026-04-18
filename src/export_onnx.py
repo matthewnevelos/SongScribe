@@ -1,10 +1,9 @@
 import torch
 import torch.nn as nn
 from nnAudio.features.cqt import CQT1992v2
-from src.models import PianoOnsetFrameCRNN
 
 class EndToEndModel(nn.Module):
-    # embed the CQT into the model
+    """wrapper which combines CQT1992v2 and model into one to prepare for ONNX export"""
     def __init__(self, original_model):
         super().__init__()
         
@@ -36,6 +35,7 @@ class EndToEndModel(nn.Module):
         return onset_probs, frame_probs
 
 def export_onnx(model, output_filename):
+    """Export model as ONNX for use in interactive web app"""
     model.cpu()
     model.eval()
     

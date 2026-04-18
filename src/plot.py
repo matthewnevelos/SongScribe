@@ -53,6 +53,7 @@ def save_debug_samples(raw_waveform, augmented_waveform, raw_cqt, augmented_cqt,
     print(f"Saved audio and plots to {save_path.absolute()}")
     
 def plot_CQT(CQT, sr, hop_length=256, show=False, file_path = None, title=None):
+    """Plot CQT"""
     arr = CQT.detach().cpu().squeeze().numpy()
     num_frames = arr.shape[1]
     dur_sec = (num_frames * hop_length) / sr
@@ -92,6 +93,7 @@ def plot_sheet(sheet, show=False, file_path = None):
 import matplotlib.pyplot as plt
 
 def plot_midi(midi, show=False, file_path=None, title=None):
+    """Plot midi"""
     fig, ax = plt.subplots(figsize=(10, 4))
     
     # colours for using multiple instruments

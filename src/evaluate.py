@@ -24,7 +24,11 @@ def decode_onsets_and_frames(onset_probs, frame_probs, onset_threshold=0.5, fram
             
     return predictions
 
-def binarize_output(frame_probs, onset_probs=None, onset_threshold=0.5, frame_threshold=0.3, activation_function = torch.sigmoid):
+def binarize_output(frame_probs, onset_probs=None, onset_threshold=0.5, frame_threshold=0.3):
+    """
+    Convert probabilities to bool based on thresholds.
+    """
+    
     if onset_probs is not None:
         # Dual-output decoding
         return decode_onsets_and_frames(
@@ -38,7 +42,11 @@ def binarize_output(frame_probs, onset_probs=None, onset_threshold=0.5, frame_th
         return (frame_probs > frame_threshold).float()
 
 
-def eval_metrics(model, test_loader, preprocessor):
+def eval_metrics(model, test_loader, preprocessor, activation_function=torch.sigmoid):
+    """
+    Print Loss, Accuracy, Precision, Recall, F1_Score
+    """
+    
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     print(f"\n--- Starting Evaluation on {device} ---")
@@ -103,7 +111,7 @@ def eval_metrics(model, test_loader, preprocessor):
             total_loss += loss.item()
 
             prediction_logits = frame_logits if isinstance(outputs, tuple) else outputs #type: ignore
-            preds = (torch.sigmoid(prediction_logits) > 0.5).float()
+            preds = (activation_function(prediction_logits) > 0.5).float()
 
             preds_flat = preds.reshape(-1)
             labels_flat = eval_labels.reshape(-1)

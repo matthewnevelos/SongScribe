@@ -5,11 +5,13 @@ import librosa
 from scipy.signal import medfilt
 from pathlib import Path
 from .format_converter import output_to_midi, midi_to_sheet, audio_to_CQT
-from .evaluate import binarize_output, eval_metrics
+from .evaluate import binarize_output
 
 
 def transcribe_audio(audio_path, trained_model, output_dir, chunk_seconds=5.0, sr = 22050, hop_length=256,
                      frame_threshold = 0.3, onset_threshold=0.5, show=False):
+    """Transcribes audio to sheet music.
+    This is the full fledged pipeline which can do it all with one function"""
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     #Load Model

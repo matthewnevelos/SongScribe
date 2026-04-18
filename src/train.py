@@ -5,7 +5,6 @@ import torch
 from pathlib import Path
 from .evaluate import eval_metrics
 import torch.nn.utils.prune as prune
-from torch.utils.data import DataLoader
 from torch.amp.autocast_mode import autocast
 
 
@@ -39,6 +38,10 @@ def make_pruning_permanent(model):
 
 def train_model(model, preprocessor, train_loader, val_loader, epochs=5, lr=1e-4, save_dir="trained_models", 
                 model_name=None, augment=True, use_amp=True, prune_per_epoch=0.0, quantize=False):
+    """training loop
+    uses optim Adam and GradScaler
+    If epochs > 1, checks if valid loss has improved before writing over old model
+    """
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     print(f"Initializing model on {device}...")

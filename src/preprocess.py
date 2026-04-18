@@ -473,6 +473,7 @@ class MaestroPreprocessor(torch.nn.Module):
             
                 
 def get_bpm(waveform, sample_rate):
+    """estimate the bpm of a song"""
     # waveform must be numpy array
     waveform = waveform.squeeze().cpu().numpy()
     tempo, _ = librosa.beat.beat_track(y=waveform, sr=sample_rate)
