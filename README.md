@@ -1,19 +1,11 @@
 # SongScribe
 
-Transcribe song snippet into MIDI and use music21 to sheet music for musicians to learn unknown pieces. 
+Transcribe piano song into MIDI and use music21 to convert it to sheet music for musicians to learn unknown pieces. 
 
-**phase 1:**\
-Train model to convert piano solos to MIDI using MAESTRO dataset.
+**Visit the [Interactive Model](https://matthewnevelos.github.io/SongScribe/)**
 
-**phase 2:**\
-Build classifier model on instrument recognition.\
-Train multiple models on solos (drums, guitar, cello)
+## How to Create Environment
 
-**Phase 3:**\
-Test simultaneous instruments, potentially including unknown instruments. 
-
-
-## Environment
 Different environments will be made based on system requirements (CPU, GPU, GPU-ARM)
 
 ### Create Environment
@@ -48,8 +40,9 @@ pip install nnAudio librosa music21 mido mir_eval soundfile matplotlib pretty_mi
 pip install --upgrade onnx onnxscript
 ```
 
-A sheet music renderer is needed for music21. 
-MuseScore Studio for Windows/Mac
+A sheet music renderer is needed for music21. \
+[Online Renderer](https://www.soundslice.com/musicxml-viewer/) \
+MuseScore Studio for Windows/Mac \
 LilyPond for Linux.
 
 ### MuseScore installation
